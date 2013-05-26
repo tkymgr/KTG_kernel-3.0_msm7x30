@@ -1,4 +1,5 @@
 /* Copyright (c) 2008-2011, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2010, 2011 Sony Ericsson Mobile Communications AB
  *
  * All source code in this file is licensed under the following license except
  * where indicated.
@@ -14,6 +15,9 @@
  * See the GNU General Public License for more details.
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, you can find it at http://www.fsf.org.
+ *
+ * NOTE: This file has been modified by Sony Ericsson Mobile Communications AB.
+ * Modifications are licensed under the License.
  */
 
 #include <linux/init.h>
@@ -33,6 +37,9 @@
 #include <asm/dma.h>
 #include <linux/dma-mapping.h>
 #include <linux/msm_audio.h>
+#if defined(CONFIG_MACH_SEMC_MANGO)
+#include <linux/pm_qos_params.h>
+#endif
 
 #include "msm7kv2-pcm.h"
 #include <asm/mach-types.h>
@@ -53,6 +60,12 @@ char snddev_name[AUDIO_DEV_CTL_MAX_DEV][44];
 						      more deviation */
 #define LOOPBACK_ENABLE         0x1
 #define LOOPBACK_DISABLE        0x0
+
+#if defined(CONFIG_MACH_SEMC_MANGO)
+#define STEREO_RECORDING_SNDDEV "speaker_dual_mic_endfire_tx_real_stereo"
+#define PM_QOS_NO_ISAPC 10
+static struct pm_qos_request_list list;
+#endif
 
 static int device_index; /* Count of Device controls */
 static int simple_control; /* Count of simple controls*/
@@ -338,6 +351,15 @@ static int msm_device_put(struct snd_kcontrol *kcontrol,
 
 	if (set) {
 		if (!dev_info->opened) {
+#if defined(CONFIG_MACH_SEMC_MANGO)
+			if (strcmp(dev_info->name,
+				STEREO_RECORDING_SNDDEV) == 0) {
+				MM_INFO("insert cpu_dma_latency"
+						"for stereo recording\n");
+				pm_qos_add_request(&list, PM_QOS_CPU_DMA_LATENCY,
+							PM_QOS_NO_ISAPC);
+			}
+#endif
 			set_freq = dev_info->sample_rate;
 			if (!msm_device_is_voice(route_cfg.dev_id)) {
 				msm_get_voc_freq(&tx_freq, &rx_freq);
@@ -350,7 +372,7 @@ static int msm_device_put(struct snd_kcontrol *kcontrol,
 				set_freq = dev_info->sample_rate;
 
 
-			MM_ERR("device freq =%d\n", set_freq);
+			MM_INFO("device freq =%d\n", set_freq);
 			rc = dev_info->dev_ops.set_freq(dev_info, set_freq);
 			if (rc < 0) {
 				MM_ERR("device freq failed!\n");
@@ -400,6 +422,14 @@ static int msm_device_put(struct snd_kcontrol *kcontrol,
 		}
 	} else {
 		if (dev_info->opened) {
+#if defined(CONFIG_MACH_SEMC_MANGO)
+			if (strcmp(dev_info->name,
+				STEREO_RECORDING_SNDDEV) == 0) {
+				MM_INFO("remove cpu_dma_latency"
+						"for stereo recording\n");
+				pm_qos_remove_request(&list);
+			}
+#endif
 			broadcast_event(AUDDEV_EVT_REL_PENDING,
 						route_cfg.dev_id,
 						SESSION_IGNORE);
@@ -751,6 +781,9 @@ static int msm_device_mute_put(struct snd_kcontrol *kcontrol,
 		afe_dev_id = AFE_HW_PATH_MI2S_TX;
 	if (mute)
 		volume = 0;
+	else
+		volume = dev_info->dev_volume;
+
 	afe_device_volume_ctrl(afe_dev_id, volume);
 	return 0;
 }
