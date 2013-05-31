@@ -229,9 +229,6 @@ struct adsp_info {
 
 	void *handle;
 	void *cb_handle;
-
-	/* Interrupt value */
-	int int_adsp;
 };
 
 #define ADSP_STATE_DISABLED   0

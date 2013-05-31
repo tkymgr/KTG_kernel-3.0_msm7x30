@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,38 +21,54 @@
 #include <linux/gfp.h>
 #include <linux/msm_ipc.h>
 
-#ifdef CONFIG_ANDROID_PARANOID_NETWORK
-#include <linux/android_aid.h>
-#endif
-
 #include <asm/string.h>
 #include <asm/atomic.h>
 
 #include <net/sock.h>
 
+#include <mach/peripheral-loader.h>
+
 #include "ipc_router.h"
 
 #define msm_ipc_sk(sk) ((struct msm_ipc_sock *)(sk))
 #define msm_ipc_sk_port(sk) ((struct msm_ipc_port *)(msm_ipc_sk(sk)->port))
+#define MODEM_LOAD_TIMEOUT (10 * HZ)
 
 static int sockets_enabled;
 static struct proto msm_ipc_proto;
 static const struct proto_ops msm_ipc_proto_ops;
 
-#ifdef CONFIG_ANDROID_PARANOID_NETWORK
-static inline int check_permissions(void)
+static void msm_ipc_router_unload_modem(void *pil)
 {
-	int rc = 0;
-	if (!current_euid() || in_egroup_p(AID_NET_RAW))
-		rc = 1;
-	return rc;
+	if (pil)
+		pil_put(pil);
 }
-# else
-static inline int check_permissions(void)
+
+static void *msm_ipc_router_load_modem(void)
 {
-	return 1;
+	void *pil;
+	int rc;
+
+	pil = pil_get("modem");
+	if (IS_ERR(pil)) {
+		pr_debug("%s: modem load failed\n", __func__);
+		pil = NULL;
+	} else {
+		rc = wait_for_completion_interruptible_timeout(
+						&msm_ipc_remote_router_up,
+						MODEM_LOAD_TIMEOUT);
+		if (!rc)
+			rc = -ETIMEDOUT;
+		if (rc < 0) {
+			pr_err("%s: wait for remote router failed %d\n",
+				__func__, rc);
+			msm_ipc_router_unload_modem(pil);
+			pil = NULL;
+		}
+	}
+
+	return pil;
 }
-#endif
 
 static struct sk_buff_head *msm_ipc_router_build_msg(unsigned int num_sect,
 					  struct iovec const *msg_sect,
@@ -190,11 +206,6 @@ static int msm_ipc_router_create(struct net *net,
 	struct msm_ipc_port *port_ptr;
 	void *pil;
 
-	if (!check_permissions()) {
-		pr_err("%s: Do not have permissions\n", __func__);
-		return -EPERM;
-	}
-
 	if (unlikely(protocol != 0)) {
 		pr_err("%s: Protocol not supported\n", __func__);
 		return -EPROTONOSUPPORT;
@@ -225,9 +236,9 @@ static int msm_ipc_router_create(struct net *net,
 	sock_init_data(sock, sk);
 	sk->sk_rcvtimeo = DEFAULT_RCV_TIMEO;
 
-	pil = msm_ipc_load_default_node();
+	pil = msm_ipc_router_load_modem();
 	msm_ipc_sk(sk)->port = port_ptr;
-	msm_ipc_sk(sk)->default_pil = pil;
+	msm_ipc_sk(sk)->modem_pil = pil;
 
 	return 0;
 }
@@ -476,12 +487,12 @@ static int msm_ipc_router_close(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	struct msm_ipc_port *port_ptr = msm_ipc_sk_port(sk);
-	void *pil = msm_ipc_sk(sk)->default_pil;
+	void *pil = msm_ipc_sk(sk)->modem_pil;
 	int ret;
 
 	lock_sock(sk);
 	ret = msm_ipc_router_close_port(port_ptr);
-	msm_ipc_unload_default_node(pil);
+	msm_ipc_router_unload_modem(pil);
 	release_sock(sk);
 	sock_put(sk);
 	sock->sk = NULL;

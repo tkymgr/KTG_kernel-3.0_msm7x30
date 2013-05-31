@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,31 +37,9 @@
 /* Length of the DSP frame info header added to the voc packet. */
 #define DSP_FRAME_HDR_LEN 1
 
-#define MODE_IS127		0x2
-#define MODE_4GV_NB		0x3
-#define MODE_4GV_WB		0x4
 #define MODE_AMR		0x5
 #define MODE_AMR_WB		0xD
 #define MODE_PCM		0xC
-#define MODE_G711		0xA
-#define MODE_G711A		0xF
-
-enum msm_audio_g711a_frame_type {
-	MVS_G711A_SPEECH_GOOD,
-	MVS_G711A_SID,
-	MVS_G711A_NO_DATA,
-	MVS_G711A_ERASURE
-};
-
-enum msm_audio_g711a_mode {
-	MVS_G711A_MODE_MULAW,
-	MVS_G711A_MODE_ALAW
-};
-
-enum msm_audio_g711_mode {
-	MVS_G711_MODE_MULAW,
-	MVS_G711_MODE_ALAW
-};
 
 enum format {
 	FORMAT_S16_LE = 2,
@@ -96,10 +74,7 @@ enum voip_state {
 };
 
 struct voip_frame {
-	union {
 	uint32_t frame_type;
-	uint32_t packet_rate;
-	} header;
 	uint32_t len;
 	uint8_t voc_pkt[VOIP_MAX_VOC_PKT_SIZE];
 };
@@ -125,9 +100,10 @@ struct voip_drv_info {
 	wait_queue_head_t in_wait;
 
 	struct mutex lock;
+	struct mutex in_lock;
+	struct mutex out_lock;
 
 	spinlock_t dsp_lock;
-	spinlock_t dsp_ul_lock;
 
 	uint32_t mode;
 	uint32_t rate_type;
@@ -154,7 +130,7 @@ struct voip_drv_info {
 	unsigned int pcm_capture_buf_pos;       /* position in buffer */
 };
 
-static int voip_get_media_type(uint32_t mode, uint32_t rate_type,
+static int voip_get_media_type(uint32_t mode,
 				unsigned int samp_rate);
 static int voip_get_rate_type(uint32_t mode,
 				uint32_t rate,
@@ -286,7 +262,7 @@ static void voip_process_ul_pkt(uint8_t *voc_pkt,
 		return;
 
 	/* Copy up-link packet into out_queue. */
-	spin_lock_irqsave(&prtd->dsp_ul_lock, dsp_flags);
+	spin_lock_irqsave(&prtd->dsp_lock, dsp_flags);
 
 	/* discarding UL packets till start is received */
 	if (!list_empty(&prtd->free_out_queue) && prtd->capture_start) {
@@ -300,105 +276,13 @@ static void voip_process_ul_pkt(uint8_t *voc_pkt,
 			 * Bits 0-3: Frame rate
 			 * Bits 4-7: Frame type
 			 */
-			buf_node->frame.header.frame_type =
-						((*voc_pkt) & 0xF0) >> 4;
+			buf_node->frame.frame_type = ((*voc_pkt) & 0xF0) >> 4;
 			voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
 			buf_node->frame.len = pkt_len - DSP_FRAME_HDR_LEN;
 			memcpy(&buf_node->frame.voc_pkt[0],
 				voc_pkt,
 				buf_node->frame.len);
 			list_add_tail(&buf_node->list, &prtd->out_queue);
-			break;
-		}
-		case MODE_IS127:
-		case MODE_4GV_NB:
-		case MODE_4GV_WB: {
-			/* Remove the DSP frame info header.
-			 * Header format:
-			 * Bits 0-3: frame rate
-			 */
-			buf_node->frame.header.packet_rate = (*voc_pkt) & 0x0F;
-			voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
-			buf_node->frame.len = pkt_len - DSP_FRAME_HDR_LEN;
-
-			memcpy(&buf_node->frame.voc_pkt[0],
-				voc_pkt,
-				buf_node->frame.len);
-
-			list_add_tail(&buf_node->list, &prtd->out_queue);
-			break;
-		}
-		case MODE_G711:
-		case MODE_G711A:{
-			/* G711 frames are 10ms each, but the DSP works with
-			 * 20ms frames and sends two 10ms frames per buffer.
-			 * Extract the two frames and put them in separate
-			 * buffers.
-			 */
-			/* Remove the first DSP frame info header.
-			 * Header format: G711A
-			 * Bits 0-1: Frame type
-			 * Bits 2-3: Frame rate
-			 *
-			 * Header format: G711
-			 * Bits 2-3: Frame rate
-			 */
-			if (prtd->mode == MODE_G711A)
-				buf_node->frame.header.frame_type =
-							(*voc_pkt) & 0x03;
-			voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
-
-			/* There are two frames in the buffer. Length of the
-			 * first frame:
-			 */
-			buf_node->frame.len = (pkt_len -
-					       2 * DSP_FRAME_HDR_LEN) / 2;
-
-			memcpy(&buf_node->frame.voc_pkt[0],
-			       voc_pkt,
-			       buf_node->frame.len);
-			voc_pkt = voc_pkt + buf_node->frame.len;
-
-			list_add_tail(&buf_node->list, &prtd->out_queue);
-
-			/* Get another buffer from the free Q and fill in the
-			 * second frame.
-			 */
-			if (!list_empty(&prtd->free_out_queue)) {
-				buf_node =
-					list_first_entry(&prtd->free_out_queue,
-							 struct voip_buf_node,
-							 list);
-				list_del(&buf_node->list);
-
-				/* Remove the second DSP frame info header.
-				 * Header format:
-				 * Bits 0-1: Frame type
-				 * Bits 2-3: Frame rate
-				 */
-
-				if (prtd->mode == MODE_G711A)
-					buf_node->frame.header.frame_type =
-							(*voc_pkt) & 0x03;
-				voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
-
-				/* There are two frames in the buffer. Length
-				 * of the second frame:
-				 */
-				buf_node->frame.len = (pkt_len -
-					2 * DSP_FRAME_HDR_LEN) / 2;
-
-				memcpy(&buf_node->frame.voc_pkt[0],
-				       voc_pkt,
-				       buf_node->frame.len);
-
-				list_add_tail(&buf_node->list,
-					      &prtd->out_queue);
-			} else {
-				/* Drop the second frame */
-				pr_err("%s: UL data dropped, read is slow\n",
-				       __func__);
-			}
 			break;
 		}
 		default: {
@@ -412,10 +296,10 @@ static void voip_process_ul_pkt(uint8_t *voc_pkt,
 		pr_debug("ul_pkt: pkt_len =%d, frame.len=%d\n", pkt_len,
 			buf_node->frame.len);
 		prtd->pcm_capture_irq_pos += prtd->pcm_capture_count;
-		spin_unlock_irqrestore(&prtd->dsp_ul_lock, dsp_flags);
+		spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
 		snd_pcm_period_elapsed(prtd->capture_substream);
 	} else {
-		spin_unlock_irqrestore(&prtd->dsp_ul_lock, dsp_flags);
+		spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
 		pr_err("UL data dropped\n");
 	}
 
@@ -448,92 +332,14 @@ static void voip_process_dl_pkt(uint8_t *voc_pkt,
 			 * Bits 0-3: Frame rate
 			 * Bits 4-7: Frame type
 			 */
-			*voc_pkt = ((buf_node->frame.header.frame_type &
-					0x0F) << 4) | (prtd->rate_type & 0x0F);
+			*voc_pkt = ((buf_node->frame.frame_type & 0x0F) << 4) |
+					(prtd->rate_type & 0x0F);
 			voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
 			*pkt_len = buf_node->frame.len + DSP_FRAME_HDR_LEN;
 			memcpy(voc_pkt,
 				&buf_node->frame.voc_pkt[0],
 				buf_node->frame.len);
 			list_add_tail(&buf_node->list, &prtd->free_in_queue);
-			break;
-		}
-		case MODE_IS127:
-		case MODE_4GV_NB:
-		case MODE_4GV_WB: {
-			/* Add the DSP frame info header. Header format:
-			 * Bits 0-3 : Frame rate
-			*/
-			*voc_pkt = buf_node->frame.header.packet_rate & 0x0F;
-			voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
-			*pkt_len = buf_node->frame.len + DSP_FRAME_HDR_LEN;
-
-			memcpy(voc_pkt,
-				&buf_node->frame.voc_pkt[0],
-				buf_node->frame.len);
-
-			list_add_tail(&buf_node->list, &prtd->free_in_queue);
-			break;
-		}
-		case MODE_G711:
-		case MODE_G711A:{
-			/* G711 frames are 10ms each but the DSP expects 20ms
-			 * worth of data, so send two 10ms frames per buffer.
-			 */
-			/* Add the first DSP frame info header. Header format:
-			 * Bits 0-1: Frame type
-			 * Bits 2-3: Frame rate
-			 */
-
-			*voc_pkt = ((prtd->rate_type  & 0x0F) << 2) |
-				    (buf_node->frame.header.frame_type & 0x03);
-			voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
-
-			*pkt_len = buf_node->frame.len + DSP_FRAME_HDR_LEN;
-
-			memcpy(voc_pkt,
-			       &buf_node->frame.voc_pkt[0],
-			       buf_node->frame.len);
-			voc_pkt = voc_pkt + buf_node->frame.len;
-
-			list_add_tail(&buf_node->list, &prtd->free_in_queue);
-
-			if (!list_empty(&prtd->in_queue)) {
-				/* Get the second buffer. */
-				buf_node = list_first_entry(&prtd->in_queue,
-							struct voip_buf_node,
-							list);
-				list_del(&buf_node->list);
-
-				/* Add the second DSP frame info header.
-				 * Header format:
-				 * Bits 0-1: Frame type
-				 * Bits 2-3: Frame rate
-				 */
-				*voc_pkt = ((prtd->rate_type & 0x0F) << 2) |
-				(buf_node->frame.header.frame_type & 0x03);
-				voc_pkt = voc_pkt + DSP_FRAME_HDR_LEN;
-
-				*pkt_len = *pkt_len +
-					buf_node->frame.len + DSP_FRAME_HDR_LEN;
-
-				memcpy(voc_pkt,
-				       &buf_node->frame.voc_pkt[0],
-				       buf_node->frame.len);
-
-				list_add_tail(&buf_node->list,
-					      &prtd->free_in_queue);
-			} else {
-				/* Only 10ms worth of data is available, signal
-				 * erasure frame.
-				 */
-				*voc_pkt = ((prtd->rate_type & 0x0F) << 2) |
-					    (MVS_G711A_ERASURE & 0x03);
-
-				*pkt_len = *pkt_len + DSP_FRAME_HDR_LEN;
-				pr_debug("%s, Only 10ms read, erase 2nd frame\n",
-					 __func__);
-			}
 			break;
 		}
 		default: {
@@ -668,7 +474,6 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 	struct voip_buf_node *buf_node = NULL;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct voip_drv_info *prtd = runtime->private_data;
-	unsigned long dsp_flags;
 
 	int count = frames_to_bytes(runtime, frames);
 	pr_debug("%s: count = %d, frames=%d\n", __func__, count, (int)frames);
@@ -678,13 +483,12 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 				prtd->state == VOIP_STOPPED),
 				1 * HZ);
 	if (ret > 0) {
+		mutex_lock(&prtd->in_lock);
 		if (count <= VOIP_MAX_VOC_PKT_SIZE) {
-			spin_lock_irqsave(&prtd->dsp_lock, dsp_flags);
 			buf_node =
 				list_first_entry(&prtd->free_in_queue,
 						struct voip_buf_node, list);
 			list_del(&buf_node->list);
-			spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
 			if (prtd->mode == MODE_PCM) {
 				ret = copy_from_user(&buf_node->frame.voc_pkt,
 							buf, count);
@@ -692,15 +496,14 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 			} else
 				ret = copy_from_user(&buf_node->frame,
 							buf, count);
-			spin_lock_irqsave(&prtd->dsp_lock, dsp_flags);
 			list_add_tail(&buf_node->list, &prtd->in_queue);
-			spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
 		} else {
 			pr_err("%s: Write cnt %d is > VOIP_MAX_VOC_PKT_SIZE\n",
 				__func__, count);
 			ret = -ENOMEM;
 		}
 
+		mutex_unlock(&prtd->in_lock);
 	} else if (ret == 0) {
 		pr_err("%s: No free DL buffs\n", __func__);
 		ret = -ETIMEDOUT;
@@ -719,7 +522,6 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 	struct voip_buf_node *buf_node = NULL;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct voip_drv_info *prtd = runtime->private_data;
-	unsigned long dsp_flags;
 
 	count = frames_to_bytes(runtime, frames);
 
@@ -731,13 +533,12 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 				1 * HZ);
 
 	if (ret > 0) {
+		mutex_lock(&prtd->out_lock);
 
 		if (count <= VOIP_MAX_VOC_PKT_SIZE) {
-			spin_lock_irqsave(&prtd->dsp_ul_lock, dsp_flags);
 			buf_node = list_first_entry(&prtd->out_queue,
 					struct voip_buf_node, list);
 			list_del(&buf_node->list);
-			spin_unlock_irqrestore(&prtd->dsp_ul_lock, dsp_flags);
 			if (prtd->mode == MODE_PCM)
 				ret = copy_to_user(buf,
 						   &buf_node->frame.voc_pkt,
@@ -751,17 +552,15 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 					__func__, ret);
 				ret = -EFAULT;
 			}
-			spin_lock_irqsave(&prtd->dsp_ul_lock, dsp_flags);
 			list_add_tail(&buf_node->list,
 						&prtd->free_out_queue);
-			spin_unlock_irqrestore(&prtd->dsp_ul_lock, dsp_flags);
-
 		} else {
 			pr_err("%s: Read count %d > VOIP_MAX_VOC_PKT_SIZE\n",
 				__func__, count);
 			ret = -ENOMEM;
 		}
 
+		mutex_unlock(&prtd->out_lock);
 
 	} else if (ret == 0) {
 		pr_err("%s: No UL data available\n", __func__);
@@ -795,7 +594,6 @@ static int msm_pcm_close(struct snd_pcm_substream *substream)
 	struct snd_pcm_substream *p_substream, *c_substream;
 	struct snd_pcm_runtime *runtime;
 	struct voip_drv_info *prtd;
-	unsigned long dsp_flags;
 
 	if (substream == NULL) {
 		pr_err("substream is NULL\n");
@@ -834,7 +632,7 @@ static int msm_pcm_close(struct snd_pcm_substream *substream)
 			goto capt;
 		}
 		if (p_dma_buf->area != NULL) {
-			spin_lock_irqsave(&prtd->dsp_lock, dsp_flags);
+			mutex_lock(&prtd->in_lock);
 			list_for_each_safe(ptr, next, &prtd->in_queue) {
 				buf_node = list_entry(ptr,
 						struct voip_buf_node, list);
@@ -845,11 +643,11 @@ static int msm_pcm_close(struct snd_pcm_substream *substream)
 						struct voip_buf_node, list);
 				list_del(&buf_node->list);
 			}
-			spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
 			dma_free_coherent(p_substream->pcm->card->dev,
 				runtime->hw.buffer_bytes_max, p_dma_buf->area,
 				p_dma_buf->addr);
 			p_dma_buf->area = NULL;
+			mutex_unlock(&prtd->in_lock);
 		}
 		/* release out_queue and free_out_queue */
 capt:		c_substream = prtd->capture_substream;
@@ -863,7 +661,7 @@ capt:		c_substream = prtd->capture_substream;
 			goto done;
 		}
 		if (c_dma_buf->area != NULL) {
-			spin_lock_irqsave(&prtd->dsp_ul_lock, dsp_flags);
+			mutex_lock(&prtd->out_lock);
 			list_for_each_safe(ptr, next, &prtd->out_queue) {
 				buf_node = list_entry(ptr,
 						struct voip_buf_node, list);
@@ -874,11 +672,11 @@ capt:		c_substream = prtd->capture_substream;
 						struct voip_buf_node, list);
 				list_del(&buf_node->list);
 			}
-			spin_unlock_irqrestore(&prtd->dsp_ul_lock, dsp_flags);
 			dma_free_coherent(c_substream->pcm->card->dev,
 				runtime->hw.buffer_bytes_max, c_dma_buf->area,
 				c_dma_buf->addr);
 			c_dma_buf->area = NULL;
+			mutex_unlock(&prtd->out_lock);
 		}
 done:
 		prtd->capture_substream = NULL;
@@ -893,7 +691,7 @@ static int msm_pcm_prepare(struct snd_pcm_substream *substream)
 	int ret = 0;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct voip_drv_info *prtd = runtime->private_data;
-	uint32_t media_type = 0;
+	int32_t media_type = 0;
 	uint32_t rate_type = 0;
 
 	mutex_lock(&prtd->lock);
@@ -904,10 +702,7 @@ static int msm_pcm_prepare(struct snd_pcm_substream *substream)
 		ret = msm_pcm_capture_prepare(substream);
 
 	if ((runtime->format != FORMAT_SPECIAL) &&
-		 ((prtd->mode == MODE_AMR) || (prtd->mode == MODE_AMR_WB) ||
-		 (prtd->mode == MODE_IS127) || (prtd->mode == MODE_4GV_NB) ||
-		 (prtd->mode == MODE_4GV_WB) || (prtd->mode == MODE_G711) ||
-		 (prtd->mode == MODE_G711A))) {
+		 ((prtd->mode == MODE_AMR) || (prtd->mode == MODE_AMR_WB))) {
 		pr_err("mode:%d and format:%u are not mached\n",
 			prtd->mode, (uint32_t)runtime->format);
 		ret =  -EINVAL;
@@ -935,7 +730,6 @@ static int msm_pcm_prepare(struct snd_pcm_substream *substream)
 		}
 		prtd->rate_type = rate_type;
 		media_type = voip_get_media_type(prtd->mode,
-						prtd->rate_type,
 						prtd->play_samp_rate);
 		if (media_type < 0) {
 			pr_err("fail at getting media_type\n");
@@ -1050,15 +844,19 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 		for (i = 0; i < VOIP_MAX_Q_LEN; i++) {
 			buf_node = (void *)dma_buf->area + offset;
 
+			mutex_lock(&voip_info.in_lock);
 			list_add_tail(&buf_node->list,
 					&voip_info.free_in_queue);
+			mutex_unlock(&voip_info.in_lock);
 			offset = offset + sizeof(struct voip_buf_node);
 		}
 	} else {
 		for (i = 0; i < VOIP_MAX_Q_LEN; i++) {
 			buf_node = (void *) dma_buf->area + offset;
+			mutex_lock(&voip_info.out_lock);
 			list_add_tail(&buf_node->list,
 					&voip_info.free_out_queue);
+			mutex_unlock(&voip_info.out_lock);
 			offset = offset + sizeof(struct voip_buf_node);
 		}
 	}
@@ -1178,28 +976,6 @@ static int voip_get_rate_type(uint32_t mode, uint32_t rate,
 		*rate_type = 0;
 		break;
 	}
-	case MODE_IS127:
-	case MODE_4GV_NB:
-	case MODE_4GV_WB: {
-		switch (rate) {
-		case VOC_0_RATE:
-		case VOC_8_RATE:
-		case VOC_4_RATE:
-		case VOC_2_RATE:
-		case VOC_1_RATE:
-			*rate_type = rate;
-			break;
-		default:
-			pr_err("wrong rate for IS127/4GV_NB/WB.\n");
-			ret = -EINVAL;
-			break;
-		}
-		break;
-	}
-	case MODE_G711:
-	case MODE_G711A:
-		*rate_type = rate;
-		break;
 	default:
 		pr_err("wrong mode type.\n");
 		ret = -EINVAL;
@@ -1209,10 +985,10 @@ static int voip_get_rate_type(uint32_t mode, uint32_t rate,
 	return ret;
 }
 
-static int voip_get_media_type(uint32_t mode, uint32_t rate_type,
+static int voip_get_media_type(uint32_t mode,
 				unsigned int samp_rate)
 {
-	uint32_t media_type;
+	int32_t media_type;
 
 	pr_debug("%s: mode=%d, samp_rate=%d\n", __func__,
 		mode, samp_rate);
@@ -1228,22 +1004,6 @@ static int voip_get_media_type(uint32_t mode, uint32_t rate_type,
 			media_type = VSS_MEDIA_ID_PCM_NB;
 		else
 			media_type = VSS_MEDIA_ID_PCM_WB;
-		break;
-	case MODE_IS127: /* EVRC-A */
-		media_type = VSS_MEDIA_ID_EVRC_MODEM;
-		break;
-	case MODE_4GV_NB: /* EVRC-B */
-		media_type = VSS_MEDIA_ID_4GV_NB_MODEM;
-		break;
-	case MODE_4GV_WB: /* EVRC-WB */
-		media_type = VSS_MEDIA_ID_4GV_WB_MODEM;
-		break;
-	case MODE_G711:
-	case MODE_G711A:
-		if (rate_type == MVS_G711A_MODE_MULAW)
-			media_type = VSS_MEDIA_ID_G711_MULAW;
-		else
-			media_type = VSS_MEDIA_ID_G711_ALAW;
 		break;
 	default:
 		pr_debug(" input mode is not supported\n");
@@ -1311,9 +1071,10 @@ static int __init msm_soc_platform_init(void)
 	memset(&voip_info, 0, sizeof(voip_info));
 	voip_info.mode = MODE_PCM;
 	mutex_init(&voip_info.lock);
+	mutex_init(&voip_info.in_lock);
+	mutex_init(&voip_info.out_lock);
 
 	spin_lock_init(&voip_info.dsp_lock);
-	spin_lock_init(&voip_info.dsp_ul_lock);
 
 	init_waitqueue_head(&voip_info.out_wait);
 	init_waitqueue_head(&voip_info.in_wait);

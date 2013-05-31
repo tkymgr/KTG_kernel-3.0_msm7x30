@@ -1,6 +1,7 @@
 /* drivers/video/msm/mddi_novatek_fwvga.c
  *
  * Copyright (c) 2009-2010 Sony Ericsson Mobile Communications
+ *  KTG modified for Xperia 2011
  *
  * All source code in this file is licensed under the following license
  *
@@ -19,7 +20,7 @@
 
 #include <mach/mddi_novatek_fwvga.h>
 #include <linux/i2c.h>
-#include <linux/hrtimer.h>
+#include <linux/delay.h>
 #include "msm_fb.h"
 #include "mddihost.h"
 #include "mddihosti.h"
@@ -125,21 +126,6 @@ static struct device_attribute novatek_dev_attr_vsync = {
 	},
 	.store = novatek_vsync_store,
 };
-
-static void hr_msleep(int ms)
-{
-	struct timespec req_time;
-	long ret;
-
-	req_time.tv_sec = ms / 1000;
-	req_time.tv_nsec = (ms % 1000) * 1000000;
-
-	ret = hrtimer_nanosleep(&req_time, NULL, HRTIMER_MODE_REL,
-							CLOCK_MONOTONIC);
-	if (ret != 0)
-		printk(KERN_ERR "%s: nanosleep failed, ret = %ld\n", __func__,
-									ret);
-}
 
 static void novatek_controller_execute(const struct novatek_reg_set *rs)
 {

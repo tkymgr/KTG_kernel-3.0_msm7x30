@@ -326,11 +326,11 @@ EXPORT_SYMBOL(pfn_valid);
 #endif
 
 #ifndef CONFIG_SPARSEMEM
-static void __init arm_memory_present(void)
+static void arm_memory_present(void)
 {
 }
 #else
-static void __init arm_memory_present(void)
+static void arm_memory_present(void)
 {
 	struct meminfo *mi = &meminfo;
 	int i;
@@ -361,6 +361,8 @@ void __init find_membank0_hole(void)
 
 	membank0_size = meminfo.bank[0].size;
 	membank1_start = meminfo.bank[1].start;
+
+	pr_info("m0 size %lx m1 start %lx\n", membank0_size, membank1_start);
 }
 #endif
 

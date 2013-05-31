@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -650,6 +650,23 @@ static const struct dev_pm_ops pm8058_xoadc_dev_pm_ops = {
 #define PM8058_XOADC_DEV_PM_OPS NULL
 #endif
 
+static int __devexit pm8058_xoadc_teardown(struct platform_device *pdev)
+{
+	struct pmic8058_adc *adc_pmic = platform_get_drvdata(pdev);
+
+	if (adc_pmic->pdata->xoadc_vreg_shutdown != NULL)
+		adc_pmic->pdata->xoadc_vreg_shutdown();
+
+	wake_lock_destroy(&adc_pmic->adc_wakelock);
+	msm_xo_put(adc_pmic->adc_voter);
+	platform_set_drvdata(pdev, NULL);
+	device_init_wakeup(&pdev->dev, 0);
+	kfree(adc_pmic);
+	xoadc_initialized = false;
+
+	return 0;
+}
+
 static int __devinit pm8058_xoadc_probe(struct platform_device *pdev)
 {
 	struct xoadc_platform_data *pdata = pdev->dev.platform_data;
@@ -661,7 +678,7 @@ static int __devinit pm8058_xoadc_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	adc_pmic = devm_kzalloc(&pdev->dev, sizeof(*adc_pmic), GFP_KERNEL);
+	adc_pmic = kzalloc(sizeof(struct pmic8058_adc), GFP_KERNEL);
 	if (!adc_pmic) {
 		dev_err(&pdev->dev, "Unable to allocate memory\n");
 		return -ENOMEM;
@@ -676,16 +693,17 @@ static int __devinit pm8058_xoadc_probe(struct platform_device *pdev)
 
 	if (adc_pmic->xoadc_num > XOADC_PMIC_0) {
 		dev_err(&pdev->dev, "ADC device not supported\n");
-		return -EINVAL;
+		rc = -EINVAL;
+		goto err_cleanup;
 	}
 
 	adc_pmic->pdata = pdata;
-	adc_pmic->adc_graph = devm_kzalloc(&pdev->dev,
-		sizeof(struct linear_graph) * MAX_CHANNEL_PROPERTIES_QUEUE,
-		GFP_KERNEL);
+	adc_pmic->adc_graph = kzalloc(sizeof(struct linear_graph)
+			* MAX_CHANNEL_PROPERTIES_QUEUE, GFP_KERNEL);
 	if (!adc_pmic->adc_graph) {
 		dev_err(&pdev->dev, "Unable to allocate memory\n");
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto err_cleanup;
 	}
 
 	/* Will be replaced by individual channel calibration */
@@ -721,29 +739,32 @@ static int __devinit pm8058_xoadc_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&adc_pmic->conv_queue_list->slots);
 
 	adc_pmic->adc_irq = platform_get_irq(pdev, 0);
-	if (adc_pmic->adc_irq < 0)
-		return -ENXIO;
+	if (adc_pmic->adc_irq < 0) {
+		rc = -ENXIO;
+		goto err_cleanup;
+	}
 
 	rc = request_threaded_irq(adc_pmic->adc_irq,
 				NULL, pm8058_xoadc,
 		IRQF_TRIGGER_RISING, "pm8058_adc_interrupt", adc_pmic);
 	if (rc) {
 		dev_err(&pdev->dev, "failed to request adc irq\n");
-		return rc;
+		goto err_cleanup;
 	}
 
 	disable_irq(adc_pmic->adc_irq);
+
+	device_init_wakeup(&pdev->dev, pdata->xoadc_wakeup);
 
 	if (adc_pmic->adc_voter == NULL) {
 		adc_pmic->adc_voter = msm_xo_get(MSM_XO_TCXO_D1,
 							"pmic8058_xoadc");
 		if (IS_ERR(adc_pmic->adc_voter)) {
 			dev_err(&pdev->dev, "Failed to get XO vote\n");
-			return PTR_ERR(adc_pmic->adc_voter);
+			goto err_cleanup;
 		}
 	}
 
-	device_init_wakeup(&pdev->dev, pdata->xoadc_wakeup);
 	wake_lock_init(&adc_pmic->adc_wakelock, WAKE_LOCK_SUSPEND,
 					"pmic8058_xoadc_wakelock");
 
@@ -756,21 +777,11 @@ static int __devinit pm8058_xoadc_probe(struct platform_device *pdev)
 	xoadc_calib_first_adc = false;
 
 	return 0;
-}
 
-static int __devexit pm8058_xoadc_teardown(struct platform_device *pdev)
-{
-	struct pmic8058_adc *adc_pmic = platform_get_drvdata(pdev);
+err_cleanup:
+	pm8058_xoadc_teardown(pdev);
 
-	if (adc_pmic->pdata->xoadc_vreg_shutdown != NULL)
-		adc_pmic->pdata->xoadc_vreg_shutdown();
-
-	wake_lock_destroy(&adc_pmic->adc_wakelock);
-	msm_xo_put(adc_pmic->adc_voter);
-	device_init_wakeup(&pdev->dev, 0);
-	xoadc_initialized = false;
-
-	return 0;
+	return rc;
 }
 
 static struct platform_driver pm8058_xoadc_driver = {

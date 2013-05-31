@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,7 +18,6 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/clk.h>
-#include <mach/socinfo.h>
 #include "footswitch.h"
 #include "proc_comm.h"
 
@@ -93,10 +92,10 @@ static int enable_clocks(struct footswitch *fs)
 	fs->is_rate_set = !!(clk_get_rate(fs->src_clk));
 	if (!fs->is_rate_set)
 		clk_set_rate(fs->src_clk, fs->src_clk_init_rate);
-	clk_prepare_enable(fs->core_clk);
+	clk_enable(fs->core_clk);
 
 	if (fs->ahb_clk)
-		clk_prepare_enable(fs->ahb_clk);
+		clk_enable(fs->ahb_clk);
 
 	return 0;
 }
@@ -104,8 +103,8 @@ static int enable_clocks(struct footswitch *fs)
 static void disable_clocks(struct footswitch *fs)
 {
 	if (fs->ahb_clk)
-		clk_disable_unprepare(fs->ahb_clk);
-	clk_disable_unprepare(fs->core_clk);
+		clk_disable(fs->ahb_clk);
+	clk_disable(fs->core_clk);
 }
 
 static int footswitch_is_enabled(struct regulator_dev *rdev)
@@ -205,14 +204,14 @@ static int get_clocks(struct device *dev, struct footswitch *fs)
 		fs->src_clk = clk_get(dev, "core_clk");
 	}
 	if (IS_ERR(fs->src_clk)) {
-		pr_err("%s clk_get(src_clk) failed\n", fs->desc.name);
+		pr_err("clk_get(src_clk) failed\n");
 		rc = PTR_ERR(fs->src_clk);
 		goto err_src_clk;
 	}
 
 	fs->core_clk = clk_get(dev, "core_clk");
 	if (IS_ERR(fs->core_clk)) {
-		pr_err("%s clk_get(core_clk) failed\n", fs->desc.name);
+		pr_err("clk_get(core_clk) failed\n");
 		rc = PTR_ERR(fs->core_clk);
 		goto err_core_clk;
 	}
@@ -220,7 +219,7 @@ static int get_clocks(struct device *dev, struct footswitch *fs)
 	if (fs->has_ahb_clk) {
 		fs->ahb_clk = clk_get(dev, "iface_clk");
 		if (IS_ERR(fs->ahb_clk)) {
-			pr_err("%s clk_get(iface_clk) failed\n", fs->desc.name);
+			pr_err("clk_get(iface_clk) failed\n");
 			rc = PTR_ERR(fs->ahb_clk);
 			goto err_ahb_clk;
 		}
@@ -266,8 +265,7 @@ static int footswitch_probe(struct platform_device *pdev)
 	if (rc)
 		return rc;
 
-	fs->rdev = regulator_register(&fs->desc, &pdev->dev,
-							init_data, fs, NULL);
+	fs->rdev = regulator_register(&fs->desc, &pdev->dev, init_data, fs);
 	if (IS_ERR(fs->rdev)) {
 		pr_err("regulator_register(%s) failed\n", fs->desc.name);
 		rc = PTR_ERR(fs->rdev);

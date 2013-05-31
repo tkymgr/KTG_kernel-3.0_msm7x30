@@ -25,7 +25,7 @@
 #include <linux/delay.h>
 #include <linux/mutex.h>
 
-#include "qdss-priv.h"
+#include "qdss.h"
 
 #define etb_writel(etb, val, off)	__raw_writel((val), etb.base + off)
 #define etb_readl(etb, off)		__raw_readl(etb.base + off)
@@ -69,7 +69,7 @@ struct etb_ctx {
 	void __iomem	*base;
 	bool		enabled;
 	bool		reading;
-	spinlock_t	spinlock;
+	struct mutex	mutex;
 	atomic_t	in_use;
 	struct device	*dev;
 	struct kobject	*kobj;
@@ -100,13 +100,11 @@ static void __etb_enable(void)
 
 void etb_enable(void)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&etb.spinlock, flags);
+	mutex_lock(&etb.mutex);
 	__etb_enable();
 	etb.enabled = true;
 	dev_info(etb.dev, "ETB enabled\n");
-	spin_unlock_irqrestore(&etb.spinlock, flags);
+	mutex_unlock(&etb.mutex);
 }
 
 static void __etb_disable(void)
@@ -139,13 +137,11 @@ static void __etb_disable(void)
 
 void etb_disable(void)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&etb.spinlock, flags);
+	mutex_lock(&etb.mutex);
 	__etb_disable();
 	etb.enabled = false;
 	dev_info(etb.dev, "ETB disabled\n");
-	spin_unlock_irqrestore(&etb.spinlock, flags);
+	mutex_unlock(&etb.mutex);
 }
 
 static void __etb_dump(void)
@@ -204,9 +200,7 @@ static void __etb_dump(void)
 
 void etb_dump(void)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&etb.spinlock, flags);
+	mutex_lock(&etb.mutex);
 	if (etb.enabled) {
 		__etb_disable();
 		__etb_dump();
@@ -214,7 +208,7 @@ void etb_dump(void)
 
 		dev_info(etb.dev, "ETB dumped\n");
 	}
-	spin_unlock_irqrestore(&etb.spinlock, flags);
+	mutex_unlock(&etb.mutex);
 }
 
 static int etb_open(struct inode *inode, struct file *file)
@@ -274,9 +268,9 @@ static struct miscdevice etb_misc = {
 	.fops =		&etb_fops,
 };
 
-#define ETB_ATTR(__name)						\
-static struct kobj_attribute __name##_attr =				\
-	__ATTR(__name, S_IRUGO | S_IWUSR, __name##_show, __name##_store)
+#define ETB_ATTR(name)						\
+static struct kobj_attribute name##_attr =				\
+		__ATTR(name, S_IRUGO | S_IWUSR, name##_show, name##_store)
 
 static ssize_t trigger_cntr_store(struct kobject *kobj,
 			struct kobj_attribute *attr,
@@ -299,7 +293,7 @@ static ssize_t trigger_cntr_show(struct kobject *kobj,
 }
 ETB_ATTR(trigger_cntr);
 
-static int __devinit etb_sysfs_init(void)
+static int __init etb_sysfs_init(void)
 {
 	int ret;
 
@@ -324,7 +318,7 @@ err_create:
 	return ret;
 }
 
-static void __devexit etb_sysfs_exit(void)
+static void etb_sysfs_exit(void)
 {
 	sysfs_remove_file(etb.kobj, &trigger_cntr_attr.attr);
 	kobject_put(etb.kobj);
@@ -349,7 +343,7 @@ static int __devinit etb_probe(struct platform_device *pdev)
 
 	etb.dev = &pdev->dev;
 
-	spin_lock_init(&etb.spinlock);
+	mutex_init(&etb.mutex);
 
 	ret = misc_register(&etb_misc);
 	if (ret)
@@ -369,6 +363,7 @@ static int __devinit etb_probe(struct platform_device *pdev)
 err_alloc:
 	misc_deregister(&etb_misc);
 err_misc:
+	mutex_destroy(&etb.mutex);
 	iounmap(etb.base);
 err_ioremap:
 err_res:
@@ -376,13 +371,14 @@ err_res:
 	return ret;
 }
 
-static int __devexit etb_remove(struct platform_device *pdev)
+static int etb_remove(struct platform_device *pdev)
 {
 	if (etb.enabled)
 		etb_disable();
 	etb_sysfs_exit();
 	kfree(etb.buf);
 	misc_deregister(&etb_misc);
+	mutex_destroy(&etb.mutex);
 	iounmap(etb.base);
 
 	return 0;
@@ -390,23 +386,18 @@ static int __devexit etb_remove(struct platform_device *pdev)
 
 static struct platform_driver etb_driver = {
 	.probe          = etb_probe,
-	.remove         = __devexit_p(etb_remove),
+	.remove         = etb_remove,
 	.driver         = {
 		.name   = "msm_etb",
 	},
 };
 
-static int __init etb_init(void)
+int __init etb_init(void)
 {
 	return platform_driver_register(&etb_driver);
 }
-module_init(etb_init);
 
-static void __exit etb_exit(void)
+void etb_exit(void)
 {
 	platform_driver_unregister(&etb_driver);
 }
-module_exit(etb_exit);
-
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("CoreSight Embedded Trace Buffer driver");

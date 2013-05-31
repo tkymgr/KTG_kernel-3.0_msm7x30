@@ -21,10 +21,16 @@
 #include <mach/board.h>
 #include <mach/gpio.h>
 #include <mach/gpiomux.h>
-#include <mach/socinfo.h>
 #include "devices.h"
 
+/* TODO: Remove this once PM8038 physically becomes
+ * available.
+ */
+#ifndef MSM8930_PHASE_2
+#include "board-8960.h"
+#else
 #include "board-8930.h"
+#endif
 #include "board-storage-common-a.h"
 
 /* MSM8960 has 5 SDCC controllers */
@@ -54,21 +60,8 @@ static struct msm_mmc_reg_data mmc_vdd_reg_data[MAX_SDCC_CONTROLLER] = {
 		.name = "sdc_vdd",
 		.high_vol_level = 2950000,
 		.low_vol_level = 2950000,
-		/*
-		 * Normally this is not an always ON regulator. On this
-		 * platform, unfortunately the sd detect line is connected
-		 * to this via esd circuit and so turn this off/on while card
-		 * is not present causes the sd detect line to toggle
-		 * continuously. This is expected to be fixed in the newer
-		 * hardware revisions - maybe once that is done, this can be
-		 * reverted.
-		 */
-		.always_on = 1,
-		.lpm_sup = 1,
-		.hpm_uA = 800000, /* 800mA */
-		.lpm_uA = 9000,
-		.reset_at_init = true,
-	},
+		.hpm_uA = 600000, /* 600mA */
+	}
 };
 
 /* All SDCC controllers may require voting for VDD PAD voltage */
@@ -133,8 +126,8 @@ static struct msm_mmc_pad_pull sdc1_pad_pull_on_cfg[] = {
 
 static struct msm_mmc_pad_pull sdc1_pad_pull_off_cfg[] = {
 	{TLMM_PULL_SDC1_CLK, GPIO_CFG_NO_PULL},
-	{TLMM_PULL_SDC1_CMD, GPIO_CFG_PULL_UP},
-	{TLMM_PULL_SDC1_DATA, GPIO_CFG_PULL_UP}
+	{TLMM_PULL_SDC1_CMD, GPIO_CFG_PULL_DOWN},
+	{TLMM_PULL_SDC1_DATA, GPIO_CFG_PULL_DOWN}
 };
 
 /* SDC3 pad data */
@@ -222,14 +215,12 @@ static struct msm_mmc_pin_data mmc_slot_pin_data[MAX_SDCC_CONTROLLER] = {
 #define MSM_MPM_PIN_SDC3_DAT1	21
 
 static unsigned int sdc1_sup_clk_rates[] = {
-	400000, 24000000, 48000000, 96000000
+	400000, 24000000, 48000000
 };
 
-#ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
 static unsigned int sdc3_sup_clk_rates[] = {
-	400000, 24000000, 48000000, 96000000, 192000000,
+	400000, 24000000, 48000000, 96000000
 };
-#endif
 
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
 static struct mmc_platform_data msm8960_sdc1_data = {
@@ -247,7 +238,6 @@ static struct mmc_platform_data msm8960_sdc1_data = {
 	.pin_data	= &mmc_slot_pin_data[SDCC1],
 	.mpm_sdiowakeup_int = MSM_MPM_PIN_SDC1_DAT1,
 	.msm_bus_voting_data = &sps_to_ddr_bus_voting_data,
-	.uhs_caps2	= MMC_CAP2_HS200_1_8V_SDR,
 };
 #endif
 
@@ -262,9 +252,6 @@ static struct mmc_platform_data msm8960_sdc3_data = {
 /*TODO: Insert right replacement for PM8038 */
 #ifndef MSM8930_PHASE_2
 	.wpswitch_gpio	= PM8921_GPIO_PM_TO_SYS(16),
-#else
-	.wpswitch_gpio	= 66,
-	.wpswitch_polarity = 1,
 #endif
 #endif
 	.vreg_data	= &mmc_slot_vreg_data[SDCC3],
@@ -274,9 +261,6 @@ static struct mmc_platform_data msm8960_sdc3_data = {
 #ifndef MSM8930_PHASE_2
 	.status_gpio	= PM8921_GPIO_PM_TO_SYS(26),
 	.status_irq	= PM8921_GPIO_IRQ(PM8921_IRQ_BASE, 26),
-#else
-	.status_gpio	= 94,
-	.status_irq	= MSM_GPIO_TO_INT(94),
 #endif
 	.irq_flags	= IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 	.is_status_gpio_active_low = true,
@@ -284,7 +268,7 @@ static struct mmc_platform_data msm8960_sdc3_data = {
 	.xpc_cap	= 1,
 	.uhs_caps	= (MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
 			MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_DDR50 |
-			MMC_CAP_UHS_SDR104 | MMC_CAP_MAX_CURRENT_800),
+			MMC_CAP_MAX_CURRENT_600),
 	.mpm_sdiowakeup_int = MSM_MPM_PIN_SDC3_DAT1,
 	.msm_bus_voting_data = &sps_to_ddr_bus_voting_data,
 };
@@ -293,41 +277,11 @@ static struct mmc_platform_data msm8960_sdc3_data = {
 void __init msm8930_init_mmc(void)
 {
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
-	/*
-	 * When eMMC runs in DDR mode on CDP platform, we have
-	 * seen instability due to DATA CRC errors. These errors are
-	 * attributed to long physical path between MSM and eMMC on CDP.
-	 * So let's not enable the DDR mode on CDP platform but let other
-	 * platforms take advantage of eMMC DDR mode.
-	 */
-	if (!machine_is_msm8930_cdp())
-		msm8960_sdc1_data.uhs_caps |= (MMC_CAP_1_8V_DDR |
-					       MMC_CAP_UHS_DDR50);
 	/* SDC1 : eMMC card connected */
 	msm_add_sdcc(1, &msm8960_sdc1_data);
 #endif
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
-	/*
-	 * All 8930 platform boards using the 1.2 SoC have been reworked so that
-	 * the sd card detect line's esd circuit is no longer powered by the sd
-	 * card's voltage regulator. So this means we can turn the regulator off
-	 * to save power without affecting the sd card detect functionality.
-	 * This change to the boards will be true for newer versions of the SoC
-	 * as well.
-	 */
-	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) >= 1 &&
-			SOCINFO_VERSION_MINOR(socinfo_get_version()) >= 2) ||
-			machine_is_msm8930_cdp()) {
-		msm8960_sdc3_data.vreg_data->vdd_data->always_on = false;
-		msm8960_sdc3_data.vreg_data->vdd_data->reset_at_init = false;
-	}
-
 	/* SDC3: External card slot */
-	if (!machine_is_msm8930_cdp()) {
-		msm8960_sdc3_data.wpswitch_gpio = 0;
-		msm8960_sdc3_data.wpswitch_polarity = 0;
-	}
-
 	msm_add_sdcc(3, &msm8960_sdc3_data);
 #endif
 }

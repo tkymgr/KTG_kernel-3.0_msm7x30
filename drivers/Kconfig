@@ -52,8 +52,6 @@ source "drivers/i2c/Kconfig"
 
 source "drivers/spi/Kconfig"
 
-source "drivers/spmi/Kconfig"
-
 source "drivers/slimbus/Kconfig"
 
 source "drivers/pps/Kconfig"
@@ -131,7 +129,5 @@ source "drivers/clk/Kconfig"
 source "drivers/hwspinlock/Kconfig"
 
 source "drivers/clocksource/Kconfig"
-
-source "drivers/gud/Kconfig"
 
 endmenu

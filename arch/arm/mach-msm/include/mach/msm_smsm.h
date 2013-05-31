@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,7 +13,6 @@
 #ifndef _ARCH_ARM_MACH_MSM_SMSM_H_
 #define _ARCH_ARM_MACH_MSM_SMSM_H_
 
-#include <linux/notifier.h>
 #if defined(CONFIG_MSM_N_WAY_SMSM)
 enum {
 	SMSM_APPS_STATE,
@@ -58,7 +57,6 @@ extern uint32_t SMSM_NUM_HOSTS;
 #define SMSM_TIMEWAIT          0x00000400
 #define SMSM_TIMEINIT          0x00000800
 #define SMSM_PWRC_EARLY_EXIT   0x00001000
-#define SMSM_LTE_COEX_AWAKE    0x00001000
 #define SMSM_WFPI              0x00002000
 #define SMSM_SLEEP             0x00004000
 #define SMSM_SLEEPEXIT         0x00008000
@@ -84,7 +82,7 @@ extern uint32_t SMSM_NUM_HOSTS;
 #define SMSM_WKUP_REASON_TIMER	0x00000008
 #define SMSM_WKUP_REASON_ALARM	0x00000010
 #define SMSM_WKUP_REASON_RESET	0x00000020
-#define SMSM_USB_PLUG_UNPLUG    0x00002000
+#define SMSM_A2_FORCE_SHUTDOWN 0x00002000
 #define SMSM_A2_RESET_BAM      0x00004000
 
 #define SMSM_VENDOR             0x00020000
@@ -95,7 +93,6 @@ extern uint32_t SMSM_NUM_HOSTS;
 #define SMSM_WLAN_TX_RINGS_EMPTY 0x00000200
 #define SMSM_WLAN_TX_ENABLE	0x00000400
 
-#define SMSM_ERR_SRV_READY         0x00008000
 
 void *smem_alloc(unsigned id, unsigned size);
 void *smem_alloc2(unsigned id, unsigned size_in);
@@ -126,8 +123,6 @@ int smsm_state_cb_register(uint32_t smsm_entry, uint32_t mask,
 	void *data);
 int smsm_state_cb_deregister(uint32_t smsm_entry, uint32_t mask,
 	void (*notify)(void *, uint32_t, uint32_t), void *data);
-int smsm_driver_state_notifier_register(struct notifier_block *nb);
-int smsm_driver_state_notifier_unregister(struct notifier_block *nb);
 void smsm_print_sleep_info(uint32_t sleep_delay, uint32_t sleep_limit,
 	uint32_t irq_mask, uint32_t wakeup_reason, uint32_t pending_irqs);
 void smsm_reset_modem(unsigned mode);

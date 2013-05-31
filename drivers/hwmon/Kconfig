@@ -777,7 +777,7 @@ config SENSORS_MAX6650
 
 config SENSORS_MSM_ADC
 	tristate "MSM ADC Driver for current measurement"
-	depends on ARCH_MSM7X30 || ARCH_MSM8X60 || ARCH_FSM9XXX || ARCH_MSM7X27A
+	depends on ARCH_MSM7X30 || ARCH_MSM8X60 || ARCH_FSM9XXX
 	default n
 	help
 	  Provides interface for measuring the ADC's on AMUX channels of XOADC,
@@ -796,14 +796,6 @@ config SENSORS_PM8XXX_ADC
 
 	  The driver supports reading the HKADC, XOADC and support to set and receive
 	  temperature threshold notifications using the Battery temperature module.
-
-config SENSORS_EPM_ADC
-	tristate "EPM ADC Driver for power measurement"
-	depends on I2C && SPI_MASTER
-	default n
-	help
-	  Provides interface for measuring the current on specific power rails
-	  through the channels on ADC1158 ADC
 
 config SENSORS_PC87360
 	tristate "National Semiconductor PC87360 family"

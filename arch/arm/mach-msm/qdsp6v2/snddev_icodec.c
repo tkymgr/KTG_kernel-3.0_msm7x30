@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -308,7 +308,7 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 	}
 	msm_snddev_rx_mclk_request();
 
-	drv->rx_osrclk = clk_get_sys(NULL, "i2s_spkr_osr_clk");
+	drv->rx_osrclk = clk_get(0, "i2s_spkr_osr_clk");
 	if (IS_ERR(drv->rx_osrclk))
 		pr_err("%s master clock Error\n", __func__);
 
@@ -320,7 +320,7 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 	}
 
 	clk_enable(drv->rx_osrclk);
-	drv->rx_bitclk = clk_get_sys(NULL, "i2s_spkr_bit_clk");
+	drv->rx_bitclk = clk_get(0, "i2s_spkr_bit_clk");
 	if (IS_ERR(drv->rx_bitclk))
 		pr_err("%s clock Error\n", __func__);
 
@@ -367,7 +367,6 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 	afe_config.mi2s.channel = afe_channel_mode;
 	afe_config.mi2s.bitwidth = 16;
 	afe_config.mi2s.line = 1;
-	afe_config.mi2s.format = MSM_AFE_I2S_FORMAT_LPCM;
 	if (msm_codec_i2s_slave_mode)
 		afe_config.mi2s.ws = 0;
 	else
@@ -437,7 +436,7 @@ static int snddev_icodec_open_tx(struct snddev_icodec_state *icodec)
 
 	msm_snddev_tx_mclk_request();
 
-	drv->tx_osrclk = clk_get_sys(NULL, "i2s_mic_osr_clk");
+	drv->tx_osrclk = clk_get(0, "i2s_mic_osr_clk");
 	if (IS_ERR(drv->tx_osrclk))
 		pr_err("%s master clock Error\n", __func__);
 
@@ -449,7 +448,7 @@ static int snddev_icodec_open_tx(struct snddev_icodec_state *icodec)
 	}
 
 	clk_enable(drv->tx_osrclk);
-	drv->tx_bitclk = clk_get_sys(NULL, "i2s_mic_bit_clk");
+	drv->tx_bitclk = clk_get(0, "i2s_mic_bit_clk");
 	if (IS_ERR(drv->tx_bitclk))
 		pr_err("%s clock Error\n", __func__);
 
@@ -486,7 +485,6 @@ static int snddev_icodec_open_tx(struct snddev_icodec_state *icodec)
 	afe_config.mi2s.channel = afe_channel_mode;
 	afe_config.mi2s.bitwidth = 16;
 	afe_config.mi2s.line = 1;
-	afe_config.mi2s.format = MSM_AFE_I2S_FORMAT_LPCM;
 	if (msm_codec_i2s_slave_mode)
 		afe_config.mi2s.ws = 0;
 	else

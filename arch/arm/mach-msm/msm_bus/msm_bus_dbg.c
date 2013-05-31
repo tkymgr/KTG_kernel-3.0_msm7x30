@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,9 +10,6 @@
  * GNU General Public License for more details.
  *
  */
-
-#define pr_fmt(fmt) "AXI: %s(): " fmt, __func__
-
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>

@@ -27,14 +27,8 @@
 
 #define PM8XXX_PWM_CHANNELS		3
 
-/*
- * For the lack of better term to distinguish functional
- * differences, hereby, LPG version 0 (V0, v0) denotes
- * PM8058/8921, and version 1 (V1, v1) denotes
- * PM8922/8038.
- */
-#define PM8XXX_LPG_V0_PWM_CHANNELS	8
-#define PM8XXX_LPG_V1_PWM_CHANNELS	6
+#define PM8XXX_LPG_BANKS                8
+#define PM8XXX_LPG_PWM_CHANNELS         PM8XXX_LPG_BANKS
 #define PM8XXX_LPG_CTL_REGS		7
 
 /* PM8XXX PWM */
@@ -160,31 +154,31 @@
 #define NSEC_32768HZ	(NSEC_PER_SEC / 32768)
 #define NSEC_19P2MHZ	(NSEC_PER_SEC / 19200000)
 
-#define NUM_LPG_PRE_DIVIDE	4
+#define CLK_PERIOD_MIN	NSEC_19P2MHZ
+#define CLK_PERIOD_MAX	NSEC_1024HZ
+
+#define NUM_LPG_PRE_DIVIDE	3  /* No default support for pre-divide = 6 */
 #define NUM_PWM_PRE_DIVIDE	2
 
-#define PRE_DIVIDE_1		1	/* v1 */
-#define PRE_DIVIDE_2		2
-#define PRE_DIVIDE_3		3
-#define PRE_DIVIDE_5		5
-#define PRE_DIVIDE_6		6
+#define PRE_DIVIDE_0		2
+#define PRE_DIVIDE_1		3
+#define PRE_DIVIDE_2		5
+
+#define PRE_DIVIDE_MIN		PRE_DIVIDE_0
+#define PRE_DIVIDE_MAX		PRE_DIVIDE_2
 
 static unsigned int pt_t[NUM_LPG_PRE_DIVIDE][NUM_CLOCKS] = {
+	{	PRE_DIVIDE_0 * NSEC_1024HZ,
+		PRE_DIVIDE_0 * NSEC_32768HZ,
+		PRE_DIVIDE_0 * NSEC_19P2MHZ,
+	},
+	{	PRE_DIVIDE_1 * NSEC_1024HZ,
+		PRE_DIVIDE_1 * NSEC_32768HZ,
+		PRE_DIVIDE_1 * NSEC_19P2MHZ,
+	},
 	{	PRE_DIVIDE_2 * NSEC_1024HZ,
 		PRE_DIVIDE_2 * NSEC_32768HZ,
 		PRE_DIVIDE_2 * NSEC_19P2MHZ,
-	},
-	{	PRE_DIVIDE_3 * NSEC_1024HZ,
-		PRE_DIVIDE_3 * NSEC_32768HZ,
-		PRE_DIVIDE_3 * NSEC_19P2MHZ,
-	},
-	{	PRE_DIVIDE_5 * NSEC_1024HZ,
-		PRE_DIVIDE_5 * NSEC_32768HZ,
-		PRE_DIVIDE_5 * NSEC_19P2MHZ,
-	},
-	{	PRE_DIVIDE_6 * NSEC_1024HZ,
-		PRE_DIVIDE_6 * NSEC_32768HZ,
-		PRE_DIVIDE_6 * NSEC_19P2MHZ,
 	},
 };
 
@@ -1373,11 +1367,6 @@ static int __devinit pm8xxx_pwm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	if (pdata != NULL)
-		dtest_channel = pdata->dtest_channel;
-	else
-		dtest_channel = -1;
-
 	mutex_init(&chip->pwm_mutex);
 
 	chip->dev = &pdev->dev;
@@ -1387,19 +1376,11 @@ static int __devinit pm8xxx_pwm_probe(struct platform_device *pdev)
 
 	if (version == PM8XXX_VERSION_8921 ||
 			version == PM8XXX_VERSION_8058 ||
-			version == PM8XXX_VERSION_8922 ||
-			version == PM8XXX_VERSION_8038) {
+			version == PM8XXX_VERSION_8922) {
 		chip->is_lpg_supported = 1;
 	}
 	if (chip->is_lpg_supported) {
-		if (version == PM8XXX_VERSION_8922 ||
-				version == PM8XXX_VERSION_8038) {
-			for (i = 0; i < NUM_CLOCKS; i++)
-				pt_t[0][i] /= PRE_DIVIDE_2;
-			chip->pwm_channels = PM8XXX_LPG_V1_PWM_CHANNELS;
-		} else {
-			chip->pwm_channels = PM8XXX_LPG_V0_PWM_CHANNELS;
-		}
+		chip->pwm_channels = PM8XXX_LPG_PWM_CHANNELS;
 		chip->pwm_total_pre_divs = NUM_LPG_PRE_DIVIDE;
 	} else {
 		chip->pwm_channels = PM8XXX_PWM_CHANNELS;
@@ -1415,10 +1396,15 @@ static int __devinit pm8xxx_pwm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	if (pdata != NULL)
+		dtest_channel = pdata->dtest_channel;
+	else
+		dtest_channel = -1;
+
 	for (i = 0; i < chip->pwm_channels; i++) {
 		chip->pwm_dev[i].pwm_id = i;
 		chip->pwm_dev[i].chip = chip;
-		if (i == dtest_channel)
+		if (i == pdata->dtest_channel)
 			chip->pwm_dev[i].dtest_mode_supported = 1;
 	}
 

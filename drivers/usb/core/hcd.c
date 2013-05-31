@@ -1395,10 +1395,11 @@ int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb,
 					ret = -EAGAIN;
 				else
 					urb->transfer_flags |= URB_DMA_MAP_SG;
-				urb->num_mapped_sgs = n;
-				if (n != urb->num_sgs)
+				if (n != urb->num_sgs) {
+					urb->num_sgs = n;
 					urb->transfer_flags |=
 							URB_DMA_SG_COMBINED;
+				}
 			} else if (urb->sg) {
 				struct scatterlist *sg = urb->sg;
 				urb->transfer_dma = dma_map_page(
@@ -1587,9 +1588,6 @@ void usb_hcd_giveback_urb(struct usb_hcd *hcd, struct urb *urb, int status)
 	unmap_urb_for_dma(hcd, urb);
 	usbmon_urb_complete(&hcd->self, urb, status);
 	usb_unanchor_urb(urb);
-
-	if (hcd->driver->log_urb_complete)
-		hcd->driver->log_urb_complete(urb, "C", status);
 
 	/* pass ownership to the completion handler */
 	urb->status = status;

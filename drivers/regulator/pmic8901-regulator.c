@@ -954,7 +954,7 @@ static int __devinit pm8901_vreg_probe(struct platform_device *pdev)
 			      &= ~(REGULATOR_MODE_NORMAL | REGULATOR_MODE_IDLE);
 
 		vreg->rdev = regulator_register(rdesc, &pdev->dev,
-				&vreg->pdata->init_data, vreg, NULL);
+				&vreg->pdata->init_data, vreg);
 		if (IS_ERR(vreg->rdev)) {
 			rc = PTR_ERR(vreg->rdev);
 			pr_err("%s: regulator_register failed for %s, rc=%d\n",

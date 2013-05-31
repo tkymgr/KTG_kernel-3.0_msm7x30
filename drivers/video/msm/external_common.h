@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -12,7 +12,6 @@
  */
 #ifndef __EXTERNAL_COMMON_H__
 #define __EXTERNAL_COMMON_H__
-#include <linux/switch.h>
 
 #ifdef DEBUG
 #ifndef DEV_DBG_PREFIX
@@ -137,10 +136,10 @@ struct hdmi_disp_mode_timing_type {
 	 480, 10, 2, 33, TRUE, 25200, 60000, FALSE, TRUE}
 #define HDMI_SETTINGS_720x480p60_4_3					\
 	{HDMI_VFRMT_720x480p60_4_3,      720,  16,  62,  60,  TRUE,	\
-	 480, 9, 6, 30,  TRUE, 27030, 60000, FALSE, TRUE}
+	 480, 9, 6, 30,  TRUE, 27027, 60000, FALSE, TRUE}
 #define HDMI_SETTINGS_720x480p60_16_9					\
 	{HDMI_VFRMT_720x480p60_16_9,     720,  16,  62,  60,  TRUE,	\
-	 480, 9, 6, 30,  TRUE, 27030, 60000, FALSE, TRUE}
+	 480, 9, 6, 30,  TRUE, 27027, 60000, FALSE, TRUE}
 #define HDMI_SETTINGS_1280x720p60_16_9					\
 	{HDMI_VFRMT_1280x720p60_16_9,    1280, 110, 40,  220, FALSE,	\
 	 720, 5, 5, 20, FALSE, 74250, 60000, FALSE, TRUE}
@@ -194,12 +193,6 @@ extern struct hdmi_disp_mode_timing_type
  * device */
 struct hdmi_disp_mode_list_type {
 	uint32	disp_mode_list[HDMI_VFRMT_MAX];
-#define TOP_AND_BOTTOM		0x10
-#define FRAME_PACKING		0x20
-#define SIDE_BY_SIDE_HALF	0x40
-	uint32	disp_3d_mode_list[HDMI_VFRMT_MAX];
-	uint32	disp_multi_3d_mode_list[16];
-	uint32	disp_multi_3d_mode_list_cnt;
 	uint32	num_of_elements;
 };
 #endif
@@ -209,7 +202,6 @@ struct external_common_state_type {
 	struct kobject *uevent_kobj;
 	uint32 video_resolution;
 	struct device *dev;
-	struct switch_dev sdev;
 #ifdef CONFIG_FB_MSM_HDMI_3D
 	boolean format_3d;
 	void (*switch_3d)(boolean on);
@@ -222,13 +214,6 @@ struct external_common_state_type {
 	uint8 speaker_allocation_block;
 	uint16 video_latency, audio_latency;
 	uint8 audio_data_block_cnt;
-	uint16 physical_address;
-	uint32 preferred_video_format;
-	uint8 pt_scan_info;
-	uint8 it_scan_info;
-	uint8 ce_scan_info;
-	uint8 spd_vendor_name[8];
-	uint8 spd_product_description[16];
 	boolean present_3d;
 	boolean present_hdcp;
 	uint32 audio_data_blocks[16];
@@ -262,8 +247,6 @@ const struct hdmi_disp_mode_timing_type *hdmi_mhl_get_mode(uint32 mode);
 const struct hdmi_disp_mode_timing_type *hdmi_mhl_get_supported_mode(
 	uint32 mode);
 void hdmi_common_init_panel_info(struct msm_panel_info *pinfo);
-
-ssize_t video_3d_format_2string(uint32 format, char *buf);
 #endif
 
 int external_common_state_create(struct platform_device *pdev);

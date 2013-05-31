@@ -1,4 +1,5 @@
-/* Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+ *  KTG modified for Xperia 2011
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,10 +30,6 @@
 
 #include <linux/fb.h>
 
-#include <linux/ktime.h>
-#include <linux/wakelock.h>
-#include <linux/time.h>
-
 #include "mdp.h"
 #include "msm_fb.h"
 #include "mdp4.h"
@@ -45,98 +42,9 @@
 
 int first_pixel_start_x;
 int first_pixel_start_y;
-static int lcdc_enabled;
 
 static struct mdp4_overlay_pipe *lcdc_pipe;
 static struct completion lcdc_comp;
-
-/*
- * MDP Timer/Functions
- * Set up an HR timer to wake up the CPU's just before the return of a VSync
- * This reduces any latencies that may arise if the CPU's were power collapsed
- * in between.
- */
-#define VSYNC_INTERVAL	16
-#define WAKE_DELAY	3 /* 3 ioctls * 600 us = 2ms + 1ms buffer */
-#define MAX_VSYNC_GAP   4 /* Marker to detect whether to skip timer */
-
-/* Move the globals into context data structure for 3.4 upgrade */
-static int first_time = 1;
-static ktime_t last_vsync_time_ns;
-static struct hrtimer hr_mdp_timer_pc;
-
-static unsigned long compute_vsync_interval(void)
-{
-	ktime_t currtime_us;
-	unsigned long diff_from_vsync, vsync_interval;
-	/*
-	 * Get interval beween last vsync and current time
-	 * Current time = CPU programming MDP for next Vsync
-	 */
-	currtime_us = ktime_get();
-	diff_from_vsync =
-		(ktime_to_us(ktime_sub(currtime_us, last_vsync_time_ns)));
-	diff_from_vsync /= USEC_PER_MSEC;
-	/*
-	 * If the last Vsync occurred more than 64 ms ago, skip programming
-	 * the timer
-	 */
-	if (diff_from_vsync < (VSYNC_INTERVAL*MAX_VSYNC_GAP)) {
-		vsync_interval =
-			(VSYNC_INTERVAL-diff_from_vsync)%VSYNC_INTERVAL;
-	} else
-		vsync_interval = VSYNC_INTERVAL+1;
-
-	return vsync_interval;
-}
-
-static enum hrtimer_restart mdp_pc_hrtimer_callback(struct hrtimer *timer)
-{
-	if (!wake_lock_active(&mdp_idle_wakelock)) {
-		/* Hold Wakelock if no locks held */
-		wake_lock(&mdp_idle_wakelock);
-	}
-	return HRTIMER_NORESTART;
-}
-
-static void init_pc_timer(void)
-{
-	/*
-	 * Initialize hr timer which fires a few ms before Vsync - this
-	 * gets rid of any latencies that may arise due to
-	 * wake up from PC
-	 */
-	hrtimer_init(&hr_mdp_timer_pc, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	hr_mdp_timer_pc.function = &mdp_pc_hrtimer_callback;
-}
-
-static void program_pc_timer(unsigned long diff_interval)
-{
-	ktime_t ktime_pc;
-	unsigned long delay_in_ns = 0;
-
-	/* Skip programming timer due to invalid delay */
-	if (diff_interval > VSYNC_INTERVAL)
-		return;
-
-	if (diff_interval < WAKE_DELAY) {
-		/*
-		 * Difference from last vsync was a multiple of refresh rate
-		 * (16*x)%16). Reset it to actual time to next vsync
-		 */
-		if (diff_interval == 0)
-			delay_in_ns = VSYNC_INTERVAL-WAKE_DELAY;
-		else
-			return;	/* too close to vsync to fire timer - skip */
-	} else if (diff_interval == WAKE_DELAY) {
-		delay_in_ns = 1;  /* diff_interval/WAKE_DELAY */
-	} else {
-		delay_in_ns = diff_interval-WAKE_DELAY;
-	}
-	delay_in_ns *= NSEC_PER_MSEC;
-	ktime_pc = ktime_set(0, delay_in_ns);
-	hrtimer_start(&hr_mdp_timer_pc, ktime_pc, HRTIMER_MODE_REL);
-}
 
 int mdp_lcdc_on(struct platform_device *pdev)
 {
@@ -171,7 +79,6 @@ int mdp_lcdc_on(struct platform_device *pdev)
 	int hsync_start_x;
 	int hsync_end_x;
 	uint8 *buf;
-	unsigned int buf_offset;
 	int bpp, ptype;
 	struct fb_info *fbi;
 	struct fb_var_screeninfo *var;
@@ -187,8 +94,6 @@ int mdp_lcdc_on(struct platform_device *pdev)
 	if (mfd->key != MFD_KEY)
 		return -EINVAL;
 
-	mdp4_overlay_ctrl_db_reset();
-
 	fbi = mfd->fbi;
 	var = &fbi->var;
 
@@ -201,7 +106,8 @@ int mdp_lcdc_on(struct platform_device *pdev)
 
 	bpp = fbi->var.bits_per_pixel / 8;
 	buf = (uint8 *) fbi->fix.smem_start;
-	buf_offset = calc_fb_offset(mfd, fbi, bpp);
+	buf += fbi->var.xoffset * bpp +
+		fbi->var.yoffset * fbi->fix.line_length;
 
 	if (lcdc_pipe == NULL) {
 		ptype = mdp4_overlay_format2type(mfd->fb_imgType);
@@ -222,8 +128,8 @@ int mdp_lcdc_on(struct platform_device *pdev)
 		init_completion(&lcdc_comp);
 
 		mdp4_init_writeback_buf(mfd, MDP4_MIXER0);
-		pipe->ov_blt_addr = 0;
-		pipe->dma_blt_addr = 0;
+		pipe->blt_addr = 0;
+
 	} else {
 		pipe = lcdc_pipe;
 	}
@@ -234,14 +140,7 @@ int mdp_lcdc_on(struct platform_device *pdev)
 	pipe->src_w = fbi->var.xres;
 	pipe->src_y = 0;
 	pipe->src_x = 0;
-	pipe->dst_h = fbi->var.yres;
-	pipe->dst_w = fbi->var.xres;
-
-	if (mfd->display_iova)
-		pipe->srcp0_addr = mfd->display_iova + buf_offset;
-	else
-		pipe->srcp0_addr = (uint32)(buf + buf_offset);
-
+	pipe->srcp0_addr = (uint32) buf;
 	pipe->srcp0_ystride = fbi->fix.line_length;
 	pipe->bpp = bpp;
 
@@ -249,6 +148,8 @@ int mdp_lcdc_on(struct platform_device *pdev)
 	mdp4_overlay_dmap_cfg(mfd, 1);
 
 	mdp4_overlay_rgb_setup(pipe);
+
+	mdp4_mixer_stage_up(pipe);
 
 	mdp4_overlayproc_cfg(pipe);
 
@@ -265,8 +166,8 @@ int mdp_lcdc_on(struct platform_device *pdev)
 	lcdc_underflow_clr = mfd->panel_info.lcdc.underflow_clr;
 	lcdc_hsync_skew = mfd->panel_info.lcdc.hsync_skew;
 
-	lcdc_width = var->xres + mfd->panel_info.lcdc.xres_pad;
-	lcdc_height = var->yres + mfd->panel_info.lcdc.yres_pad;
+	lcdc_width = var->xres;
+	lcdc_height = var->yres;
 	lcdc_bpp = mfd->panel_info.bpp;
 
 	hsync_period =
@@ -332,17 +233,17 @@ int mdp_lcdc_on(struct platform_device *pdev)
 	MDP_OUTP(MDP_BASE + LCDC_BASE + 0x24, active_v_end);
 
 	mdp4_overlay_reg_flush(pipe, 1);
-	mdp4_mixer_stage_up(pipe);
-
 #ifdef CONFIG_MSM_BUS_SCALING
 	mdp_bus_scale_update_request(2);
 #endif
-	mdp_histogram_ctrl_all(TRUE);
+	mdp_histogram_ctrl(TRUE);
 
 	ret = panel_next_on(pdev);
-	if (ret == 0)
+	if (ret == 0) {
+		/* enable LCDC block */
+		MDP_OUTP(MDP_BASE + LCDC_BASE, 1);
 		mdp_pipe_ctrl(MDP_OVERLAY0_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-
+	}
 	/* MDP cmd block disable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 
@@ -356,31 +257,28 @@ int mdp_lcdc_off(struct platform_device *pdev)
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 
-	mutex_lock(&mfd->dma->ov_mutex);
+	down(&mfd->dma->ov_sem);
 
 	/* MDP cmd block enable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-	mdp4_mixer_pipe_cleanup(lcdc_pipe->mixer_num);
 	MDP_OUTP(MDP_BASE + LCDC_BASE, 0);
-	lcdc_enabled = 0;
 	/* MDP cmd block disable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 	mdp_pipe_ctrl(MDP_OVERLAY0_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 
-	mdp_histogram_ctrl_all(FALSE);
+	mdp_histogram_ctrl(FALSE);
 	ret = panel_next_off(pdev);
 
-	mutex_unlock(&mfd->dma->ov_mutex);
+	up(&mfd->dma->ov_sem);
 
 	/* delay to make sure the last frame finishes */
-	msleep(20);
+	msleep(16);
 
+#ifdef LCDC_RGB_UNSTAGE
 	/* dis-engage rgb0 from mixer0 */
-	if (lcdc_pipe) {
+	if (lcdc_pipe)
 		mdp4_mixer_stage_down(lcdc_pipe);
-		mdp4_iommu_unmap(lcdc_pipe);
-	}
-
+#endif
 #ifdef CONFIG_MSM_BUS_SCALING
 	mdp_bus_scale_update_request(0);
 #endif
@@ -395,7 +293,7 @@ static void mdp4_lcdc_blt_ov_update(struct mdp4_overlay_pipe *pipe)
 	char *overlay_base;
 
 
-	if (pipe->ov_blt_addr == 0)
+	if (pipe->blt_addr == 0)
 		return;
 
 
@@ -407,7 +305,7 @@ static void mdp4_lcdc_blt_ov_update(struct mdp4_overlay_pipe *pipe)
 	off = 0;
 	if (pipe->ov_cnt & 0x01)
 		off = pipe->src_height * pipe->src_width * bpp;
-	addr = pipe->ov_blt_addr + off;
+	addr = pipe->blt_addr + off;
 
 	/* overlay 0 */
 	overlay_base = MDP_BASE + MDP4_OVERLAYPROC0_BASE;/* 0x10000 */
@@ -420,7 +318,7 @@ static void mdp4_lcdc_blt_dmap_update(struct mdp4_overlay_pipe *pipe)
 	uint32 off, addr;
 	int bpp;
 
-	if (pipe->ov_blt_addr == 0)
+	if (pipe->blt_addr == 0)
 		return;
 
 
@@ -432,7 +330,7 @@ static void mdp4_lcdc_blt_dmap_update(struct mdp4_overlay_pipe *pipe)
 	off = 0;
 	if (pipe->dmap_cnt & 0x01)
 		off = pipe->src_height * pipe->src_width * bpp;
-	addr = pipe->dma_blt_addr + off;
+	addr = pipe->blt_addr + off;
 
 	/* dmap */
 	MDP_OUTP(MDP_BASE + 0x90008, addr);
@@ -448,22 +346,11 @@ static void mdp4_overlay_lcdc_wait4event(struct msm_fb_data_type *mfd,
 {
 	unsigned long flag;
 	unsigned int data;
-    unsigned long vsync_interval;
 
 	data = inpdw(MDP_BASE + LCDC_BASE);
 	data &= 0x01;
 	if (data == 0)	/* timing generator disabled */
 		return;
-
-	if ((intr_done == INTR_PRIMARY_VSYNC) ||
-			(intr_done == INTR_DMA_P_DONE)) {
-		if (first_time) {
-			init_pc_timer();
-			first_time = 0;
-		}
-		vsync_interval = compute_vsync_interval();
-		program_pc_timer(vsync_interval);
-	}
 
 	spin_lock_irqsave(&mdp_spin_lock, flag);
 	INIT_COMPLETION(lcdc_comp);
@@ -499,18 +386,6 @@ static void mdp4_overlay_lcdc_dma_busy_wait(struct msm_fb_data_type *mfd)
 	pr_debug("%s: done pid=%d\n", __func__, current->pid);
 }
 
-void mdp4_overlay_lcdc_start(void)
-{
-	if (!lcdc_enabled) {
-		/* enable LCDC block */
-		mdp4_iommu_attach();
-		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-		MDP_OUTP(MDP_BASE + LCDC_BASE, 1);
-		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
-		lcdc_enabled = 1;
-	}
-}
-
 void mdp4_overlay_lcdc_vsync_push(struct msm_fb_data_type *mfd,
 			struct mdp4_overlay_pipe *pipe)
 {
@@ -519,7 +394,7 @@ void mdp4_overlay_lcdc_vsync_push(struct msm_fb_data_type *mfd,
 	if (pipe->flags & MDP_OV_PLAY_NOWAIT)
 		return;
 
-	if (lcdc_pipe->ov_blt_addr) {
+	if (lcdc_pipe->blt_addr) {
 		mdp4_overlay_lcdc_dma_busy_wait(mfd);
 
 		mdp4_lcdc_blt_ov_update(lcdc_pipe);
@@ -549,10 +424,6 @@ void mdp4_overlay_lcdc_vsync_push(struct msm_fb_data_type *mfd,
 void mdp4_primary_vsync_lcdc(void)
 {
 	complete_all(&lcdc_comp);
-	last_vsync_time_ns = ktime_get();
-	/* Release Wakelock */
-	if (wake_lock_active(&mdp_idle_wakelock))
-		wake_unlock(&mdp_idle_wakelock);
 }
 
 /*
@@ -561,10 +432,6 @@ void mdp4_primary_vsync_lcdc(void)
 void mdp4_dma_p_done_lcdc(void)
 {
 	complete_all(&lcdc_comp);
-	last_vsync_time_ns = ktime_get();
-	/* Release Wakelock */
-	if (wake_lock_active(&mdp_idle_wakelock))
-		wake_unlock(&mdp_idle_wakelock);
 }
 
 /*
@@ -574,7 +441,7 @@ void mdp4_overlay0_done_lcdc(struct mdp_dma_data *dma)
 {
 	spin_lock(&mdp_spin_lock);
 	dma->busy = FALSE;
-	if (lcdc_pipe->ov_blt_addr == 0) {
+	if (lcdc_pipe->blt_addr == 0) {
 		spin_unlock(&mdp_spin_lock);
 		return;
 	}
@@ -585,29 +452,6 @@ void mdp4_overlay0_done_lcdc(struct mdp_dma_data *dma)
 	complete(&dma->comp);
 }
 
-static void mdp4_overlay_lcdc_prefill(struct msm_fb_data_type *mfd)
-{
-	unsigned long flag;
-
-	if (lcdc_pipe->ov_blt_addr) {
-		mdp4_overlay_lcdc_dma_busy_wait(mfd);
-
-		mdp4_lcdc_blt_ov_update(lcdc_pipe);
-		lcdc_pipe->ov_cnt++;
-
-		spin_lock_irqsave(&mdp_spin_lock, flag);
-		outp32(MDP_INTR_CLEAR, INTR_OVERLAY0_DONE);
-		mdp_intr_mask |= INTR_OVERLAY0_DONE;
-		outp32(MDP_INTR_ENABLE, mdp_intr_mask);
-		mdp_enable_irq(MDP_OVERLAY0_TERM);
-		mfd->dma->busy = TRUE;
-		mb();	/* make sure all registers updated */
-		spin_unlock_irqrestore(&mdp_spin_lock, flag);
-		outpdw(MDP_BASE + 0x0004, 0); /* kickoff overlay engine */
-		mdp4_stat.kickoff_ov0++;
-		mb();
-	}
-}
 /*
  * make sure the MIPI_DSI_WRITEBACK_SIZE defined at boardfile
  * has enough space h * w * 3 * 2
@@ -619,26 +463,24 @@ static void mdp4_lcdc_do_blt(struct msm_fb_data_type *mfd, int enable)
 
 	mdp4_allocate_writeback_buf(mfd, MDP4_MIXER0);
 
-	if (!mfd->ov0_wb_buf->write_addr) {
+	if (!mfd->ov0_wb_buf->phys_addr) {
 		pr_debug("%s: no blt_base assigned\n", __func__);
 		return;
 	}
 
 	spin_lock_irqsave(&mdp_spin_lock, flag);
-	if (enable && lcdc_pipe->ov_blt_addr == 0) {
-		lcdc_pipe->ov_blt_addr = mfd->ov0_wb_buf->write_addr;
-		lcdc_pipe->dma_blt_addr = mfd->ov0_wb_buf->read_addr;
+	if (enable && lcdc_pipe->blt_addr == 0) {
+		lcdc_pipe->blt_addr = mfd->ov0_wb_buf->phys_addr;
 		change++;
 		lcdc_pipe->blt_cnt = 0;
 		lcdc_pipe->ov_cnt = 0;
 		lcdc_pipe->dmap_cnt = 0;
 		mdp4_stat.blt_lcdc++;
-	} else if (enable == 0 && lcdc_pipe->ov_blt_addr) {
-		lcdc_pipe->ov_blt_addr = 0;
-		lcdc_pipe->dma_blt_addr = 0;
+	} else if (enable == 0 && lcdc_pipe->blt_addr) {
+		lcdc_pipe->blt_addr = 0;
 		change++;
 	}
-	pr_info("%s: ov_blt_addr=%x\n", __func__, (int)lcdc_pipe->ov_blt_addr);
+	pr_info("%s: blt_addr=%x\n", __func__, (int)lcdc_pipe->blt_addr);
 	spin_unlock_irqrestore(&mdp_spin_lock, flag);
 
 	if (!change)
@@ -647,12 +489,8 @@ static void mdp4_lcdc_do_blt(struct msm_fb_data_type *mfd, int enable)
 	mdp4_overlay_lcdc_wait4event(mfd, INTR_DMA_P_DONE);
 	MDP_OUTP(MDP_BASE + LCDC_BASE, 0);	/* stop lcdc */
 	msleep(20);
-	mdp4_overlay_dmap_xy(lcdc_pipe);
 	mdp4_overlayproc_cfg(lcdc_pipe);
-	if (lcdc_pipe->ov_blt_addr) {
-		mdp4_overlay_lcdc_prefill(mfd);
-		mdp4_overlay_lcdc_prefill(mfd);
-	}
+	mdp4_overlay_dmap_xy(lcdc_pipe);
 	MDP_OUTP(MDP_BASE + LCDC_BASE, 1);	/* start lcdc */
 }
 
@@ -687,7 +525,6 @@ void mdp4_lcdc_overlay(struct msm_fb_data_type *mfd)
 {
 	struct fb_info *fbi = mfd->fbi;
 	uint8 *buf;
-	unsigned int buf_offset;
 	int bpp;
 	struct mdp4_overlay_pipe *pipe;
 
@@ -697,22 +534,15 @@ void mdp4_lcdc_overlay(struct msm_fb_data_type *mfd)
 	/* no need to power on cmd block since it's lcdc mode */
 	bpp = fbi->var.bits_per_pixel / 8;
 	buf = (uint8 *) fbi->fix.smem_start;
-	buf_offset = calc_fb_offset(mfd, fbi, bpp);
+	buf += fbi->var.xoffset * bpp +
+		fbi->var.yoffset * fbi->fix.line_length;
 
-	mutex_lock(&mfd->dma->ov_mutex);
+	down(&mfd->dma->ov_sem);
 
 	pipe = lcdc_pipe;
-
-	if (mfd->display_iova)
-		pipe->srcp0_addr = mfd->display_iova + buf_offset;
-	else
-		pipe->srcp0_addr = (uint32)(buf + buf_offset);
-
+	pipe->srcp0_addr = (uint32) buf;
 	mdp4_overlay_rgb_setup(pipe);
-	mdp4_overlay_reg_flush(pipe, 0);
-	mdp4_mixer_stage_up(pipe);
-	mdp4_overlay_lcdc_start();
+	mdp4_overlay_reg_flush(pipe, 1);
 	mdp4_overlay_lcdc_vsync_push(mfd, pipe);
-	mdp4_iommu_unmap(pipe);
-	mutex_unlock(&mfd->dma->ov_mutex);
+	up(&mfd->dma->ov_sem);
 }

@@ -27,14 +27,23 @@
  * CDC ACM driver.  However, for many purposes it's just as functional
  * if you can arrange appropriate host side drivers.
  */
-#define GSERIAL_NO_PORTS 3
+#define GSERIAL_NO_PORTS 2
 
+struct gser_descs {
+	struct usb_endpoint_descriptor	*in;
+	struct usb_endpoint_descriptor	*out;
+#ifdef CONFIG_MODEM_SUPPORT
+	struct usb_endpoint_descriptor	*notify;
+#endif
+};
 
 struct f_gser {
 	struct gserial			port;
 	u8				data_id;
 	u8				port_num;
 
+	struct gser_descs		fs;
+	struct gser_descs		hs;
 	u8				online;
 	enum transport_type		transport;
 
@@ -42,6 +51,7 @@ struct f_gser {
 	u8				pending;
 	spinlock_t			lock;
 	struct usb_ep			*notify;
+	struct usb_endpoint_descriptor	*notify_desc;
 	struct usb_request		*notify_req;
 
 	struct usb_cdc_line_coding	port_line_coding;
@@ -67,7 +77,6 @@ static unsigned int no_tty_ports;
 static unsigned int no_sdio_ports;
 static unsigned int no_smd_ports;
 static unsigned int no_hsic_sports;
-static unsigned int no_hsuart_sports;
 static unsigned int nr_ports;
 
 static struct port_info {
@@ -250,9 +259,9 @@ static int gport_setup(struct usb_configuration *c)
 	int i;
 
 	pr_debug("%s: no_tty_ports: %u no_sdio_ports: %u"
-		" no_smd_ports: %u no_hsic_sports: %u no_hsuart_ports: %u nr_ports: %u\n",
+		" no_smd_ports: %u no_hsic_sports: %u nr_ports: %u\n",
 			__func__, no_tty_ports, no_sdio_ports, no_smd_ports,
-			no_hsic_sports, no_hsuart_sports, nr_ports);
+			no_hsic_sports, nr_ports);
 
 	if (no_tty_ports)
 		ret = gserial_setup(c->cdev->gadget, no_tty_ports);
@@ -277,22 +286,6 @@ static int gport_setup(struct usb_configuration *c)
 		ret = ghsic_ctrl_setup(no_hsic_sports, USB_GADGET_SERIAL);
 		if (ret < 0)
 			return ret;
-		return 0;
-	}
-	if (no_hsuart_sports) {
-		port_idx = ghsuart_data_setup(no_hsuart_sports,
-					USB_GADGET_SERIAL);
-		if (port_idx < 0)
-			return port_idx;
-
-		for (i = 0; i < nr_ports; i++) {
-			if (gserial_ports[i].transport ==
-					USB_GADGET_XPORT_HSUART) {
-				gserial_ports[i].client_port_num = port_idx;
-				port_idx++;
-			}
-		}
-
 		return 0;
 	}
 	return ret;
@@ -334,14 +327,6 @@ static int gport_connect(struct f_gser *gser)
 			return ret;
 		}
 		break;
-	case USB_GADGET_XPORT_HSUART:
-		ret = ghsuart_data_connect(&gser->port, port_num);
-		if (ret) {
-			pr_err("%s: ghsuart_data_connect failed: err:%d\n",
-					__func__, ret);
-			return ret;
-		}
-		break;
 	default:
 		pr_err("%s: Un-supported transport: %s\n", __func__,
 				xport_to_str(gser->transport));
@@ -374,9 +359,6 @@ static int gport_disconnect(struct f_gser *gser)
 	case USB_GADGET_XPORT_HSIC:
 		ghsic_ctrl_disconnect(&gser->port, port_num);
 		ghsic_data_disconnect(&gser->port, port_num);
-		break;
-	case USB_GADGET_XPORT_HSUART:
-		ghsuart_data_disconnect(&gser->port, port_num);
 		break;
 	default:
 		pr_err("%s: Un-supported transport:%s\n", __func__,
@@ -496,15 +478,10 @@ static int gser_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 		DBG(cdev, "reset generic ctl ttyGS%d\n", gser->port_num);
 		usb_ep_disable(gser->notify);
 	}
-
-	if (!gser->notify->desc) {
-		if (config_ep_by_speed(cdev->gadget, f, gser->notify)) {
-			gser->notify->desc = NULL;
-			return -EINVAL;
-		}
-	}
-	rc = usb_ep_enable(gser->notify);
-
+	gser->notify_desc = ep_choose(cdev->gadget,
+			gser->hs.notify,
+			gser->fs.notify);
+	rc = usb_ep_enable(gser->notify, gser->notify_desc);
 	if (rc) {
 		ERROR(cdev, "can't enable %s, result %d\n",
 					gser->notify->name, rc);
@@ -516,16 +493,13 @@ static int gser_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	if (gser->port.in->driver_data) {
 		DBG(cdev, "reset generic data ttyGS%d\n", gser->port_num);
 		gport_disconnect(gser);
+	} else {
+		DBG(cdev, "activate generic data ttyGS%d\n", gser->port_num);
 	}
-	if (!gser->port.in->desc || !gser->port.out->desc) {
-		DBG(cdev, "activate generic ttyGS%d\n", gser->port_num);
-		if (config_ep_by_speed(cdev->gadget, f, gser->port.in) ||
-			config_ep_by_speed(cdev->gadget, f, gser->port.out)) {
-			gser->port.in->desc = NULL;
-			gser->port.out->desc = NULL;
-			return -EINVAL;
-		}
-	}
+	gser->port.in_desc = ep_choose(cdev->gadget,
+			gser->hs.in, gser->fs.in);
+	gser->port.out_desc = ep_choose(cdev->gadget,
+			gser->hs.out, gser->fs.out);
 
 	gport_connect(gser);
 
@@ -770,6 +744,16 @@ gser_bind(struct usb_configuration *c, struct usb_function *f)
 	if (!f->descriptors)
 		goto fail;
 
+	gser->fs.in = usb_find_endpoint(gser_fs_function,
+			f->descriptors, &gser_fs_in_desc);
+	gser->fs.out = usb_find_endpoint(gser_fs_function,
+			f->descriptors, &gser_fs_out_desc);
+#ifdef CONFIG_MODEM_SUPPORT
+	gser->fs.notify = usb_find_endpoint(gser_fs_function,
+			f->descriptors, &gser_fs_notify_desc);
+#endif
+
+
 	/* support all relevant hardware speeds... we expect that when
 	 * hardware is dual speed, all bulk-capable endpoints work at
 	 * both speeds
@@ -790,6 +774,14 @@ gser_bind(struct usb_configuration *c, struct usb_function *f)
 		if (!f->hs_descriptors)
 			goto fail;
 
+		gser->hs.in = usb_find_endpoint(gser_hs_function,
+				f->hs_descriptors, &gser_hs_in_desc);
+		gser->hs.out = usb_find_endpoint(gser_hs_function,
+				f->hs_descriptors, &gser_hs_out_desc);
+#ifdef CONFIG_MODEM_SUPPORT
+		gser->hs.notify = usb_find_endpoint(gser_hs_function,
+				f->hs_descriptors, &gser_hs_notify_desc);
+#endif
 	}
 
 	DBG(cdev, "generic ttyGS%d: %s speed IN/%s OUT/%s\n",
@@ -882,13 +874,11 @@ int gser_bind_config(struct usb_configuration *c, u8 port_num)
 	gser->port.func.disable = gser_disable;
 	gser->transport		= gserial_ports[port_num].transport;
 #ifdef CONFIG_MODEM_SUPPORT
-	/* We support only three ports for now */
+	/* We support only two ports for now */
 	if (port_num == 0)
 		gser->port.func.name = "modem";
-	else if (port_num == 1)
-		gser->port.func.name = "nmea";
 	else
-		gser->port.func.name = "modem2";
+		gser->port.func.name = "nmea";
 	gser->port.func.setup = gser_setup;
 	gser->port.connect = gser_connect;
 	gser->port.get_dtr = gser_get_dtr;
@@ -939,10 +929,6 @@ static int gserial_init_port(int port_num, const char *name)
 	case USB_GADGET_XPORT_HSIC:
 		/*client port number will be updated in gport_setup*/
 		no_hsic_sports++;
-		break;
-	case USB_GADGET_XPORT_HSUART:
-		/*client port number will be updated in gport_setup*/
-		no_hsuart_sports++;
 		break;
 	default:
 		pr_err("%s: Un-supported transport transport: %u\n",

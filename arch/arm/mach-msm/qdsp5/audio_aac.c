@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2008-2009, 2011-2012 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2009, 2011 The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -39,6 +39,7 @@
 #include <mach/msm_adsp.h>
 #include <mach/iommu.h>
 #include <mach/iommu_domains.h>
+#include <mach/msm_subsystem_map.h>
 #include <mach/qdsp5/qdsp5audppcmdi.h>
 #include <mach/qdsp5/qdsp5audppmsg.h>
 #include <mach/qdsp5/qdsp5audplaycmdi.h>
@@ -125,8 +126,8 @@ struct audio {
 	/* ---- End of Host PCM section */
 
 	struct msm_adsp_module *audplay;
-	void *map_v_read;
-	void *map_v_write;
+	struct msm_mapped_buffer *map_v_read;
+	struct msm_mapped_buffer *map_v_write;
 
 	/* configuration to use on next enable */
 	uint32_t out_sample_rate;
@@ -297,7 +298,6 @@ static int audio_disable(struct audio *audio)
 			rc = -EFAULT;
 		else
 			rc = 0;
-		audio->stopped = 1;
 		wake_up(&audio->write_wait);
 		wake_up(&audio->read_wait);
 		msm_adsp_disable(audio->audplay);
@@ -672,31 +672,24 @@ static void audplay_send_data(struct audio *audio, unsigned needed)
 
 static void audio_flush(struct audio *audio)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&audio->dsp_lock, flags);
 	audio->out[0].used = 0;
 	audio->out[1].used = 0;
 	audio->out_head = 0;
 	audio->out_tail = 0;
 	audio->reserved = 0;
 	audio->out_needed = 0;
-	spin_unlock_irqrestore(&audio->dsp_lock, flags);
 	atomic_set(&audio->out_bytes, 0);
 }
 
 static void audio_flush_pcm_buf(struct audio *audio)
 {
 	uint8_t index;
-	unsigned long flags;
 
-	spin_lock_irqsave(&audio->dsp_lock, flags);
 	for (index = 0; index < PCM_BUF_MAX_COUNT; index++)
 		audio->in[index].used = 0;
 	audio->buf_refresh = 0;
 	audio->read_next = 0;
 	audio->fill_next = 0;
-	spin_unlock_irqrestore(&audio->dsp_lock, flags);
 }
 
 static int audaac_validate_usr_config(struct msm_audio_aac_config *config)
@@ -997,6 +990,7 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case AUDIO_STOP:
 		MM_DBG("AUDIO_STOP\n");
 		rc = audio_disable(audio);
+		audio->stopped = 1;
 		audio_ioport_reset(audio);
 		audio->stopped = 0;
 		break;
@@ -1508,9 +1502,9 @@ static int audio_release(struct inode *inode, struct file *file)
 	audio->event_abort = 1;
 	wake_up(&audio->event_wait);
 	audaac_reset_event_queue(audio);
-	iounmap(audio->map_v_write);
+	msm_subsystem_unmap_buffer(audio->map_v_write);
 	free_contiguous_memory_by_paddr(audio->phys);
-	iounmap(audio->map_v_read);
+	msm_subsystem_unmap_buffer(audio->map_v_read);
 	free_contiguous_memory_by_paddr(audio->read_phys);
 	mutex_unlock(&audio->lock);
 #ifdef CONFIG_DEBUG_FS
@@ -1700,7 +1694,10 @@ static int audio_open(struct inode *inode, struct file *file)
 		MM_DBG("pmemsz = %d\n", pmem_sz);
 		audio->phys = allocate_contiguous_ebi_nomap(pmem_sz, SZ_4K);
 		if (audio->phys) {
-			audio->map_v_write = ioremap(audio->phys, pmem_sz);
+			audio->map_v_write = msm_subsystem_map_buffer(
+							audio->phys, pmem_sz,
+							MSM_SUBSYSTEM_MAP_KADDR,
+							NULL, 0);
 			if (IS_ERR(audio->map_v_write)) {
 				MM_ERR("could not map write buffers, \
 						freeing instance 0x%08x\n",
@@ -1711,7 +1708,7 @@ static int audio_open(struct inode *inode, struct file *file)
 				kfree(audio);
 				goto done;
 			}
-			audio->data = audio->map_v_write;
+			audio->data = audio->map_v_write->vaddr;
 			MM_DBG("write buf: phy addr 0x%08x kernel addr \
 				0x%08x\n", audio->phys, (int)audio->data);
 			break;
@@ -1733,26 +1730,29 @@ static int audio_open(struct inode *inode, struct file *file)
 		MM_ERR("could not allocate read buffers, freeing instance \
 				0x%08x\n", (int)audio);
 		rc = -ENOMEM;
-		iounmap(audio->map_v_write);
+		msm_subsystem_unmap_buffer(audio->map_v_write);
 		free_contiguous_memory_by_paddr(audio->phys);
 		audpp_adec_free(audio->dec_id);
 		kfree(audio);
 		goto done;
 	}
-	audio->map_v_read = ioremap(audio->read_phys,
-					PCM_BUFSZ_MIN * PCM_BUF_MAX_COUNT);
+	audio->map_v_read = msm_subsystem_map_buffer(
+					audio->read_phys,
+					PCM_BUFSZ_MIN * PCM_BUF_MAX_COUNT,
+					MSM_SUBSYSTEM_MAP_KADDR,
+					NULL, 0);
 	if (IS_ERR(audio->map_v_read)) {
 		MM_ERR("could not map read buffers, freeing instance \
 				0x%08x\n", (int)audio);
 		rc = -ENOMEM;
-		iounmap(audio->map_v_write);
+		msm_subsystem_unmap_buffer(audio->map_v_write);
 		free_contiguous_memory_by_paddr(audio->phys);
 		free_contiguous_memory_by_paddr(audio->read_phys);
 		audpp_adec_free(audio->dec_id);
 		kfree(audio);
 		goto done;
 	}
-	audio->read_data = audio->map_v_read;
+	audio->read_data = audio->map_v_read->vaddr;
 	MM_DBG("read buf: phy addr 0x%08x kernel addr 0x%08x\n",
 				audio->read_phys, (int)audio->read_data);
 
@@ -1873,9 +1873,9 @@ static int audio_open(struct inode *inode, struct file *file)
 done:
 	return rc;
 err:
-	iounmap(audio->map_v_write);
+	msm_subsystem_unmap_buffer(audio->map_v_write);
 	free_contiguous_memory_by_paddr(audio->phys);
-	iounmap(audio->map_v_read);
+	msm_subsystem_unmap_buffer(audio->map_v_read);
 	free_contiguous_memory_by_paddr(audio->read_phys);
 	audpp_adec_free(audio->dec_id);
 	kfree(audio);

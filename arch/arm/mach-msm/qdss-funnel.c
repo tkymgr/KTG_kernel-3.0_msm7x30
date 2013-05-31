@@ -19,7 +19,7 @@
 #include <linux/io.h>
 #include <linux/err.h>
 
-#include "qdss-priv.h"
+#include "qdss.h"
 
 #define funnel_writel(funnel, id, val, off)	\
 			__raw_writel((val), funnel.base + (SZ_4K * id) + off)
@@ -52,13 +52,14 @@ do {									\
 struct funnel_ctx {
 	void __iomem	*base;
 	bool		enabled;
-	struct mutex	mutex;
 	struct device	*dev;
 	struct kobject	*kobj;
 	uint32_t	priority;
 };
 
-static struct funnel_ctx funnel;
+static struct funnel_ctx funnel = {
+	.priority	= 0xFAC680,
+};
 
 static void __funnel_enable(uint8_t id, uint32_t port_mask)
 {
@@ -78,12 +79,10 @@ static void __funnel_enable(uint8_t id, uint32_t port_mask)
 
 void funnel_enable(uint8_t id, uint32_t port_mask)
 {
-	mutex_lock(&funnel.mutex);
 	__funnel_enable(id, port_mask);
 	funnel.enabled = true;
 	dev_info(funnel.dev, "FUNNEL port mask 0x%lx enabled\n",
 					(unsigned long) port_mask);
-	mutex_unlock(&funnel.mutex);
 }
 
 static void __funnel_disable(uint8_t id, uint32_t port_mask)
@@ -101,17 +100,15 @@ static void __funnel_disable(uint8_t id, uint32_t port_mask)
 
 void funnel_disable(uint8_t id, uint32_t port_mask)
 {
-	mutex_lock(&funnel.mutex);
 	__funnel_disable(id, port_mask);
 	funnel.enabled = false;
 	dev_info(funnel.dev, "FUNNEL port mask 0x%lx disabled\n",
 					(unsigned long) port_mask);
-	mutex_unlock(&funnel.mutex);
 }
 
-#define FUNNEL_ATTR(__name)						\
-static struct kobj_attribute __name##_attr =				\
-	__ATTR(__name, S_IRUGO | S_IWUSR, __name##_show, __name##_store)
+#define FUNNEL_ATTR(name)						\
+static struct kobj_attribute name##_attr =				\
+		__ATTR(name, S_IRUGO | S_IWUSR, name##_show, name##_store)
 
 static ssize_t priority_store(struct kobject *kobj,
 			struct kobj_attribute *attr,
@@ -134,7 +131,7 @@ static ssize_t priority_show(struct kobject *kobj,
 }
 FUNNEL_ATTR(priority);
 
-static int __devinit funnel_sysfs_init(void)
+static int __init funnel_sysfs_init(void)
 {
 	int ret;
 
@@ -159,7 +156,7 @@ err_create:
 	return ret;
 }
 
-static void __devexit funnel_sysfs_exit(void)
+static void funnel_sysfs_exit(void)
 {
 	sysfs_remove_file(funnel.kobj, &priority_attr.attr);
 	kobject_put(funnel.kobj);
@@ -184,8 +181,6 @@ static int __devinit funnel_probe(struct platform_device *pdev)
 
 	funnel.dev = &pdev->dev;
 
-	mutex_init(&funnel.mutex);
-
 	funnel_sysfs_init();
 
 	dev_info(funnel.dev, "FUNNEL initialized\n");
@@ -197,12 +192,11 @@ err_res:
 	return ret;
 }
 
-static int __devexit funnel_remove(struct platform_device *pdev)
+static int funnel_remove(struct platform_device *pdev)
 {
 	if (funnel.enabled)
 		funnel_disable(0x0, 0xFF);
 	funnel_sysfs_exit();
-	mutex_destroy(&funnel.mutex);
 	iounmap(funnel.base);
 
 	return 0;
@@ -210,23 +204,18 @@ static int __devexit funnel_remove(struct platform_device *pdev)
 
 static struct platform_driver funnel_driver = {
 	.probe          = funnel_probe,
-	.remove         = __devexit_p(funnel_remove),
+	.remove         = funnel_remove,
 	.driver         = {
 		.name   = "msm_funnel",
 	},
 };
 
-static int __init funnel_init(void)
+int __init funnel_init(void)
 {
 	return platform_driver_register(&funnel_driver);
 }
-module_init(funnel_init);
 
-static void __exit funnel_exit(void)
+void funnel_exit(void)
 {
 	platform_driver_unregister(&funnel_driver);
 }
-module_exit(funnel_exit);
-
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("CoreSight Funnel driver");

@@ -13,13 +13,13 @@
 
 #include <linux/init.h>
 #include <linux/ioport.h>
+#include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
 #include <linux/ion.h>
 #include <asm/mach-types.h>
 #include <mach/msm_memtypes.h>
 #include <mach/board.h>
-#include <mach/gpio.h>
 #include <mach/gpiomux.h>
 #include <mach/ion.h>
 #include <mach/msm_bus_board.h>
@@ -58,10 +58,14 @@ static struct resource msm_fb_resources[] = {
 };
 
 #define LVDS_CHIMEI_PANEL_NAME "lvds_chimei_wxga"
+#define LVDS_FRC_PANEL_NAME "lvds_frc_fhd"
 #define MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME "mipi_video_toshiba_wsvga"
 #define MIPI_VIDEO_CHIMEI_WXGA_PANEL_NAME "mipi_video_chimei_wxga"
 #define HDMI_PANEL_NAME "hdmi_msm"
 #define TVOUT_PANEL_NAME "tvout_msm"
+
+#define LVDS_PIXEL_MAP_PATTERN_1	1
+#define LVDS_PIXEL_MAP_PATTERN_2	2
 
 #ifdef CONFIG_FB_MSM_HDMI_AS_PRIMARY
 static unsigned char hdmi_is_primary = 1;
@@ -98,12 +102,18 @@ static int msm_fb_detect_panel(const char *name)
 			strnlen(MIPI_VIDEO_TOSHIBA_WSVGA_PANEL_NAME,
 				PANEL_NAME_MAX_LEN)))
 			return 0;
-	} else if (machine_is_apq8064_cdp() ||
-		       machine_is_mpq8064_dtv()) {
+	} else if (machine_is_apq8064_cdp()) {
 		if (!strncmp(name, LVDS_CHIMEI_PANEL_NAME,
 			strnlen(LVDS_CHIMEI_PANEL_NAME,
 				PANEL_NAME_MAX_LEN)))
 			return 0;
+	} else if (machine_is_mpq8064_dtv()) {
+		if (!strncmp(name, LVDS_FRC_PANEL_NAME,
+			strnlen(LVDS_FRC_PANEL_NAME,
+			PANEL_NAME_MAX_LEN))) {
+			set_mdp_clocks_for_wuxga();
+			return 0;
+		}
 	}
 
 	if (!strncmp(name, HDMI_PANEL_NAME,
@@ -245,7 +255,6 @@ static struct msm_panel_common_pdata mdp_pdata = {
 #else
 	.mem_hid = MEMTYPE_EBI1,
 #endif
-	.mdp_iommu_split_domain = 1,
 };
 
 void __init apq8064_mdp_writeback(struct memtype_reserve* reserve_table)
@@ -304,16 +313,7 @@ static struct platform_device hdmi_msm_device = {
 	.dev.platform_data = &hdmi_msm_data,
 };
 
-static char wfd_check_mdp_iommu_split_domain(void)
-{
-	return mdp_pdata.mdp_iommu_split_domain;
-}
-
 #ifdef CONFIG_FB_MSM_WRITEBACK_MSM_PANEL
-static struct msm_wfd_platform_data wfd_pdata = {
-	.wfd_check_mdp_iommu_split = wfd_check_mdp_iommu_split_domain,
-};
-
 static struct platform_device wfd_panel_device = {
 	.name = "wfd_panel",
 	.id = 0,
@@ -323,7 +323,6 @@ static struct platform_device wfd_panel_device = {
 static struct platform_device wfd_device = {
 	.name          = "msm_wfd",
 	.id            = -1,
-	.dev.platform_data = &wfd_pdata,
 };
 #endif
 
@@ -474,18 +473,11 @@ static int mipi_dsi_panel_power(int on)
 			}
 		}
 
-		rc = regulator_disable(reg_l11);
-		if (rc) {
-			pr_err("disable reg_l1 failed, rc=%d\n", rc);
-			return -ENODEV;
-		}
-
 		rc = regulator_disable(reg_lvs7);
 		if (rc) {
 			pr_err("disable reg_lvs7 failed, rc=%d\n", rc);
 			return -ENODEV;
 		}
-
 		rc = regulator_disable(reg_l2);
 		if (rc) {
 			pr_err("disable reg_l2 failed, rc=%d\n", rc);
@@ -621,7 +613,9 @@ static int lvds_pixel_remap(void)
 		u32 ver = socinfo_get_version();
 		if ((SOCINFO_VERSION_MAJOR(ver) == 1) &&
 		    (SOCINFO_VERSION_MINOR(ver) == 0))
-			return 1;
+			return LVDS_PIXEL_MAP_PATTERN_1;
+	} else if (machine_is_mpq8064_dtv()) {
+		return LVDS_PIXEL_MAP_PATTERN_2;
 	}
 	return 0;
 }
@@ -643,6 +637,23 @@ static struct platform_device lvds_chimei_panel_device = {
 	.id = 0,
 	.dev = {
 		.platform_data = &lvds_chimei_pdata,
+	}
+};
+
+#define FRC_GPIO_UPDATE	(SX150X_EXP4_GPIO_BASE + 8)
+#define FRC_GPIO_RESET	(SX150X_EXP4_GPIO_BASE + 9)
+#define FRC_GPIO_PWR	(SX150X_EXP4_GPIO_BASE + 10)
+
+static int lvds_frc_gpio[] = {FRC_GPIO_UPDATE, FRC_GPIO_RESET, FRC_GPIO_PWR};
+static struct lvds_panel_platform_data lvds_frc_pdata = {
+	.gpio = lvds_frc_gpio,
+};
+
+static struct platform_device lvds_frc_panel_device = {
+	.name = "lvds_frc_fhd",
+	.id = 0,
+	.dev = {
+		.platform_data = &lvds_frc_pdata,
 	}
 };
 
@@ -978,6 +989,8 @@ void __init apq8064_init_fb(void)
 		platform_device_register(&mipi_dsi2lvds_bridge_device);
 	if (machine_is_apq8064_mtp())
 		platform_device_register(&mipi_dsi_toshiba_panel_device);
+	if (machine_is_mpq8064_dtv())
+		platform_device_register(&lvds_frc_panel_device);
 
 	msm_fb_register_device("mdp", &mdp_pdata);
 	msm_fb_register_device("lvds", &lvds_pdata);

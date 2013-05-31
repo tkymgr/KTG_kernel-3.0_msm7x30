@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2011, The Linux Foundation. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -18,8 +18,6 @@
 #define __ASM_ARCH_MSM_IRQS_H
 
 #define MSM_IRQ_BIT(irq)     (1 << ((irq) & 31))
-
-#include "irqs-8625.h"
 
 #if defined(CONFIG_ARCH_MSM8960) || defined(CONFIG_ARCH_APQ8064) || \
 	defined(CONFIG_ARCH_MSM8930)
@@ -42,17 +40,10 @@
 #define NR_GPIO_IRQS 152
 #define NR_PM8921_IRQS 256
 #define NR_PM8821_IRQS 64
-#define NR_WCD9XXX_IRQS 49
-#define NR_TABLA_IRQS NR_WCD9XXX_IRQS
-#define NR_GPIO_EXPANDER_IRQS 64
-#ifdef CONFIG_PCI_MSI
-#define NR_PCIE_MSI_IRQS 256
+#define NR_TABLA_IRQS 49
+#define NR_GPIO_EXPANDER_IRQS 8
 #define NR_BOARD_IRQS (NR_PM8921_IRQS + NR_PM8821_IRQS + \
-		NR_WCD9XXX_IRQS + NR_GPIO_EXPANDER_IRQS + NR_PCIE_MSI_IRQS)
-#else
-#define NR_BOARD_IRQS (NR_PM8921_IRQS + NR_PM8821_IRQS + \
-		NR_WCD9XXX_IRQS + NR_GPIO_EXPANDER_IRQS)
-#endif
+		NR_TABLA_IRQS + NR_GPIO_EXPANDER_IRQS)
 #define NR_TLMM_MSM_DIR_CONN_IRQ 8 /*Need to Verify this Count*/
 #define NR_MSM_GPIOS NR_GPIO_IRQS
 
@@ -62,8 +53,6 @@
 #include "irqs-copper.h"
 #elif defined(CONFIG_ARCH_MSM9615)
 #include "irqs-9615.h"
-#elif defined(CONFIG_ARCH_MSM9625)
-#include "irqs-9625.h"
 #elif defined(CONFIG_ARCH_MSM7X30)
 #include "irqs-7x30.h"
 #elif defined(CONFIG_ARCH_QSD8X50)
@@ -74,11 +63,6 @@
 #elif defined(CONFIG_ARCH_MSM7X01A) || defined(CONFIG_ARCH_MSM7X25) \
 	|| defined(CONFIG_ARCH_MSM7X27)
 #include "irqs-7xxx.h"
-
-#define NR_GPIO_IRQS 133
-#define NR_MSM_IRQS 256
-#define NR_BOARD_IRQS 256
-#define NR_MSM_GPIOS NR_GPIO_IRQS
 #elif defined(CONFIG_ARCH_FSM9XXX)
 #include "irqs-fsm9xxx.h"
 #include "sirc.h"
@@ -92,10 +76,5 @@
 #define MSM_GPIO_TO_INT(n) (NR_MSM_IRQS + (n))
 #define FIRST_GPIO_IRQ MSM_GPIO_TO_INT(0)
 #define MSM_INT_TO_REG(base, irq) (base + irq / 32)
-
-#if defined(CONFIG_PCI_MSI) && defined(CONFIG_MSM_PCIE)
-#define MSM_PCIE_MSI_INT(n) (NR_MSM_IRQS + NR_GPIO_IRQS + NR_PM8921_IRQS +  \
-		NR_PM8821_IRQS + NR_TABLA_IRQS + NR_GPIO_EXPANDER_IRQS + (n))
-#endif
 
 #endif

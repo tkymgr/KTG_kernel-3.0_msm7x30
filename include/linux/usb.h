@@ -322,13 +322,6 @@ struct usb_bus {
 	unsigned is_b_host:1;		/* true during some HNP roleswitches */
 	unsigned b_hnp_enable:1;	/* OTG: did A-Host enable HNP? */
 	unsigned hnp_support:1;		/* OTG: HNP is supported on OTG port */
-	unsigned quick_hnp:1;		/* OTG: Indiacates if hnp is required
-					   irrespective of host_request flag
-					 */
-	unsigned otg_vbus_off:1;	/* OTG: OTG test device feature bit that
-					 * tells A-device to turn off VBUS after
-					 * B-device is disconnected.
-					 */
 	struct delayed_work hnp_polling;/* OTG: HNP polling work */
 	unsigned sg_tablesize;		/* 0 or largest number of sg list entries */
 
@@ -358,15 +351,6 @@ struct usb_bus {
 	struct mon_bus *mon_bus;	/* non-null when associated */
 	int monitored;			/* non-zero when monitored */
 #endif
-	unsigned skip_resume:1;		/* All USB devices are brought into full
-					 * power state after system resume. It
-					 * is desirable for some buses to keep
-					 * their devices in suspend state even
-					 * after system resume. The devices
-					 * are resumed later when a remote
-					 * wakeup is detected or an interface
-					 * driver starts I/O.
-					 */
 };
 
 /* ----------------------------------------------------------------------- */
@@ -1242,7 +1226,6 @@ struct urb {
 	void *transfer_buffer;		/* (in) associated data buffer */
 	dma_addr_t transfer_dma;	/* (in) dma addr for transfer_buffer */
 	struct scatterlist *sg;		/* (in) scatter gather buffer list */
-	int num_mapped_sgs;		/* (internal) mapped sg entries */
 	int num_sgs;			/* (in) number of entries in the sg list */
 	u32 transfer_buffer_length;	/* (in) data buffer length */
 	u32 actual_length;		/* (return) actual transfer length */

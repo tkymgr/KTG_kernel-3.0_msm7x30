@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,6 +29,8 @@ struct grmnet {
 
 	struct usb_ep			*in;
 	struct usb_ep			*out;
+	struct usb_endpoint_descriptor	*in_desc;
+	struct usb_endpoint_descriptor	*out_desc;
 
 	/* to usb host, aka laptop, windows pc etc. Will
 	 * be filled by usb driver of rmnet functionality
@@ -46,22 +48,12 @@ struct grmnet {
 	void (*connect)(struct grmnet *g);
 };
 
-enum ctrl_client {
-	FRMNET_CTRL_CLIENT,
-	GPS_CTRL_CLIENT,
-
-	NR_CTRL_CLIENTS
-};
-
 int gbam_setup(unsigned int no_bam_port, unsigned int no_bam2bam_port);
 int gbam_connect(struct grmnet *gr, u8 port_num,
 				 enum transport_type trans, u8 connection_idx);
 void gbam_disconnect(struct grmnet *gr, u8 port_num, enum transport_type trans);
-void gbam_suspend(struct grmnet *gr, u8 port_num, enum transport_type trans);
-void gbam_resume(struct grmnet *gr, u8 port_num, enum transport_type trans);
 int gsmd_ctrl_connect(struct grmnet *gr, int port_num);
 void gsmd_ctrl_disconnect(struct grmnet *gr, u8 port_num);
-int gsmd_ctrl_setup(enum ctrl_client client_num, unsigned int count,
-					u8 *first_port_idx);
+int gsmd_ctrl_setup(unsigned int count);
 
 #endif /* __U_RMNET_H*/

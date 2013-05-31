@@ -147,6 +147,8 @@ struct pm8921_bms_chip {
 	int			ibat_at_cv_ua;
 	int			soc_at_cv;
 	int			prev_chg_soc;
+
+	struct power_supply	*batt_psy;
 };
 
 /*
@@ -346,13 +348,18 @@ static int pm_bms_masked_write(struct pm8921_bms_chip *chip, u16 addr,
 	return 0;
 }
 
-static int usb_chg_plugged_in(void)
+static int usb_chg_plugged_in(struct pm8921_bms_chip *chip)
 {
 	int val = pm8921_is_usb_chg_plugged_in();
 
-	/* treat as if usb is not present in case of error */
-	if (val == -EINVAL)
-		val = 0;
+	/* if the charger driver was not initialized, use the restart reason */
+	if (val == -EINVAL) {
+		if (pm8xxx_restart_reason(chip->dev->parent)
+				== PM8XXX_RESTART_CHG)
+			val = 1;
+		else
+			val = 0;
+	}
 
 	return val;
 }
@@ -814,28 +821,26 @@ static int interpolate_ocv(struct pm8921_bms_chip *chip,
 }
 
 static int interpolate_pc(struct pm8921_bms_chip *chip,
-				int batt_temp, int ocv)
+				int batt_temp_degc, int ocv)
 {
 	int i, j, pcj, pcj_minus_one, pc;
 	int rows = chip->pc_temp_ocv_lut->rows;
 	int cols = chip->pc_temp_ocv_lut->cols;
 
-	/* batt_temp is in tenths of degC - convert it to degC for lookups */
-	batt_temp = batt_temp/10;
 
-	if (batt_temp < chip->pc_temp_ocv_lut->temp[0]) {
-		pr_debug("batt_temp %d < known temp range for pc\n", batt_temp);
-		batt_temp = chip->pc_temp_ocv_lut->temp[0];
+	if (batt_temp_degc < chip->pc_temp_ocv_lut->temp[0]) {
+		pr_debug("batt_temp %d < known temp range\n", batt_temp_degc);
+		batt_temp_degc = chip->pc_temp_ocv_lut->temp[0];
 	}
-	if (batt_temp > chip->pc_temp_ocv_lut->temp[cols - 1]) {
-		pr_debug("batt_temp %d > known temp range for pc\n", batt_temp);
-		batt_temp = chip->pc_temp_ocv_lut->temp[cols - 1];
+	if (batt_temp_degc > chip->pc_temp_ocv_lut->temp[cols - 1]) {
+		pr_debug("batt_temp %d > known temp range\n", batt_temp_degc);
+		batt_temp_degc = chip->pc_temp_ocv_lut->temp[cols - 1];
 	}
 
 	for (j = 0; j < cols; j++)
-		if (batt_temp <= chip->pc_temp_ocv_lut->temp[j])
+		if (batt_temp_degc <= chip->pc_temp_ocv_lut->temp[j])
 			break;
-	if (batt_temp == chip->pc_temp_ocv_lut->temp[j]) {
+	if (batt_temp_degc == chip->pc_temp_ocv_lut->temp[j]) {
 		/* found an exact match for temp in the table */
 		if (ocv >= chip->pc_temp_ocv_lut->ocv[0][j])
 			return chip->pc_temp_ocv_lut->percent[0];
@@ -858,7 +863,7 @@ static int interpolate_pc(struct pm8921_bms_chip *chip,
 	}
 
 	/*
-	 * batt_temp is within temperature for
+	 * batt_temp_degc is within temperature for
 	 * column j-1 and j
 	 */
 	if (ocv >= chip->pc_temp_ocv_lut->ocv[0][j])
@@ -898,7 +903,7 @@ static int interpolate_pc(struct pm8921_bms_chip *chip,
 				chip->pc_temp_ocv_lut->temp[j-1],
 				pcj,
 				chip->pc_temp_ocv_lut->temp[j],
-				batt_temp);
+				batt_temp_degc);
 			return pc;
 		}
 	}
@@ -910,7 +915,7 @@ static int interpolate_pc(struct pm8921_bms_chip *chip,
 		return pcj_minus_one;
 
 	pr_debug("%d ocv wasn't found for temp %d in the LUT returning 100%%",
-							ocv, batt_temp);
+							ocv, batt_temp_degc);
 	return 100;
 }
 
@@ -944,7 +949,7 @@ int override_mode_simultaneous_battery_voltage_and_current(int *ibat_ua,
 
 	mutex_unlock(&the_chip->bms_output_lock);
 
-	usb_chg = usb_chg_plugged_in();
+	usb_chg = usb_chg_plugged_in(the_chip);
 
 	convert_vbatt_raw_to_uv(the_chip, usb_chg, vbat_raw, vbat_uv);
 	convert_vsense_to_uv(the_chip, vsense_raw, &vsense_uv);
@@ -985,7 +990,7 @@ static int read_soc_params_raw(struct pm8921_bms_chip *chip,
 	pm_bms_unlock_output_data(chip);
 	mutex_unlock(&chip->bms_output_lock);
 
-	usb_chg =  usb_chg_plugged_in();
+	usb_chg =  usb_chg_plugged_in(chip);
 
 	if (chip->prev_last_good_ocv_raw == 0) {
 		chip->prev_last_good_ocv_raw = raw->last_good_ocv_raw;
@@ -1120,7 +1125,7 @@ static int calculate_pc(struct pm8921_bms_chip *chip, int ocv_uv, int batt_temp,
 {
 	int pc, scalefactor;
 
-	pc = interpolate_pc(chip, batt_temp, ocv_uv / 1000);
+	pc = interpolate_pc(chip, batt_temp / 10, ocv_uv / 1000);
 	pr_debug("pc = %u for ocv = %dmicroVolts batt_temp = %d\n",
 					pc, ocv_uv, batt_temp);
 
@@ -1876,10 +1881,6 @@ static int scale_soc_while_chg(struct pm8921_bms_chip *chip,
 	if (the_chip->start_percent == -EINVAL)
 		return prev_soc;
 
-	/* if soc is called in quick succession return the last soc */
-	if (delta_time_us < USEC_PER_SEC)
-		return prev_soc;
-
 	chg_time_sec = DIV_ROUND_UP(the_chip->charge_time_us, USEC_PER_SEC);
 	catch_up_sec = DIV_ROUND_UP(the_chip->catch_up_time_us, USEC_PER_SEC);
 	pr_debug("cts= %d catch_up_sec = %d\n", chg_time_sec, catch_up_sec);
@@ -1918,6 +1919,16 @@ static bool is_shutdown_soc_within_limits(struct pm8921_bms_chip *chip, int soc)
 
 	return 1;
 }
+
+static void update_power_supply(struct pm8921_bms_chip *chip)
+{
+	if (chip->batt_psy == NULL || chip->batt_psy < 0)
+		chip->batt_psy = power_supply_get_by_name("battery");
+
+	if (chip->batt_psy > 0)
+		power_supply_changed(chip->batt_psy);
+}
+
 /*
  * Remaining Usable Charge = remaining_charge (charge at ocv instance)
  *				- coloumb counter charge
@@ -1939,6 +1950,7 @@ static int calculate_state_of_charge(struct pm8921_bms_chip *chip,
 	int new_ucc_uah;
 	int new_rbatt;
 	int shutdown_soc;
+	int new_calculated_soc;
 	static int firsttime = 1;
 
 	calculate_soc_params(chip, raw, batt_temp, chargecycles,
@@ -2056,10 +2068,14 @@ static int calculate_state_of_charge(struct pm8921_bms_chip *chip,
 	mutex_unlock(&soc_invalidation_mutex);
 
 	pr_debug("SOC before adjustment = %d\n", soc);
-	calculated_soc = adjust_soc(chip, soc, batt_temp, chargecycles,
+	new_calculated_soc = adjust_soc(chip, soc, batt_temp, chargecycles,
 			rbatt, fcc_uah, unusable_charge_uah, cc_uah);
 
-	pr_debug("calculated SOC = %d\n", calculated_soc);
+	pr_debug("calculated SOC = %d\n", new_calculated_soc);
+	if (new_calculated_soc != calculated_soc)
+		update_power_supply(chip);
+
+	calculated_soc = new_calculated_soc;
 	firsttime = 0;
 	return calculated_soc;
 }
@@ -2251,7 +2267,7 @@ static void calib_hkadc(struct pm8921_bms_chip *chip)
 	}
 	voltage = xoadc_reading_to_microvolt(result.adc_code);
 
-	usb_chg = usb_chg_plugged_in();
+	usb_chg = usb_chg_plugged_in(chip);
 	pr_debug("result 0.625V = 0x%x, voltage = %duV adc_meas = %lld "
 				"usb_chg = %d\n",
 				result.adc_code, voltage, result.measurement,
@@ -2738,7 +2754,7 @@ static void check_initial_ocv(struct pm8921_bms_chip *chip)
 	 */
 	ocv_uv = 0;
 	pm_bms_read_output_data(chip, LAST_GOOD_OCV_VALUE, &ocv_raw);
-	usb_chg = usb_chg_plugged_in();
+	usb_chg = usb_chg_plugged_in(chip);
 	rc = convert_vbatt_raw_to_uv(chip, usb_chg, ocv_raw, &ocv_uv);
 	if (rc || ocv_uv == 0) {
 		rc = adc_based_ocv(chip, &ocv_uv);
@@ -3232,7 +3248,10 @@ static int __devinit pm8921_bms_probe(struct platform_device *pdev)
 	check_initial_ocv(chip);
 
 	/* start periodic hkadc calibration */
-	schedule_delayed_work(&chip->calib_hkadc_delayed_work, 0);
+	calib_hkadc(chip);
+	schedule_delayed_work(&chip->calib_hkadc_delayed_work,
+			round_jiffies_relative(msecs_to_jiffies
+			(HKADC_CALIB_DELAY_MS)));
 
 	/* enable the vbatt reading interrupts for scheduling hkadc calib */
 	pm8921_bms_enable_irq(chip, PM8921_BMS_GOOD_OCV);

@@ -19,25 +19,9 @@
 #define __ASM_ARCH_MSM_HSUSB_H
 
 #include <linux/types.h>
-#include <linux/usb/ch9.h>
-#include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
 #include <linux/wakelock.h>
-
-/*
- * The following are bit fields describing the usb_request.udc_priv word.
- * These bit fields are set by function drivers that wish to queue
- * usb_requests with sps/bam parameters.
- */
-#define MSM_PIPE_ID_MASK		(0x1F)
-#define MSM_TX_PIPE_ID_OFS		(16)
-#define MSM_SPS_MODE			BIT(5)
-#define MSM_IS_FINITE_TRANSFER		BIT(6)
-#define MSM_PRODUCER			BIT(7)
-#define MSM_DISABLE_WB			BIT(8)
-#define MSM_ETD_IOC			BIT(9)
-#define MSM_INTERNAL_MEM		BIT(10)
-#define MSM_VENDOR_ID			BIT(16)
+#include <linux/pm_qos_params.h>
 
 /**
  * Supported USB modes
@@ -135,9 +119,6 @@ enum usb_chg_state {
  *			or more downstream ports. Capable of supplying
  *			IDEV_CHG_MAX irrespective of devices connected on
  *			accessory ports.
- * USB_PROPRIETARY_CHARGER A proprietary charger pull DP and DM to specific
- *			voltages between 2.0-3.3v for identification.
- *
  */
 enum usb_chg_type {
 	USB_INVALID_CHARGER = 0,
@@ -148,28 +129,19 @@ enum usb_chg_type {
 	USB_ACA_B_CHARGER,
 	USB_ACA_C_CHARGER,
 	USB_ACA_DOCK_CHARGER,
-	USB_PROPRIETARY_CHARGER,
 };
 
 /**
- * Used different VDDCX voltage voting mechnism
- * VDDCX_CORNER       Vote for VDDCX Corner voltage
- * VDDCX              Vote for VDDCX Absolute voltage
+ * SPS Pipes direction.
+ *
+ * USB_TO_PEER_PERIPHERAL	USB (as Producer) to other
+ *                          peer peripheral.
+ * PEER_PERIPHERAL_TO_USB	Other Peripheral to
+ *                          USB (as consumer).
  */
-enum usb_vdd_type {
-	VDDCX_CORNER = 0,
-	VDDCX,
-	VDD_TYPE_MAX,
-};
-
-/**
- * Used different VDDCX voltage values
- */
-enum usb_vdd_value {
-	VDD_NONE = 0,
-	VDD_MIN,
-	VDD_MAX,
-	VDD_VAL_MAX,
+enum usb_bam_pipe_dir {
+	USB_TO_PEER_PERIPHERAL,
+	PEER_PERIPHERAL_TO_USB,
 };
 
 /**
@@ -185,21 +157,13 @@ enum usb_vdd_value {
  * @default_mode: Default operational mode. Applicable only if
  *              OTG switch is controller by user.
  * @pmic_id_irq: IRQ number assigned for PMIC USB ID line.
- * @mpm_otgsessvld_int: MPM wakeup pin assigned for OTG SESSVLD
- *              interrupt. Used when .otg_control == OTG_PHY_CONTROL.
  * @mhl_enable: indicates MHL connector or not.
  * @disable_reset_on_disconnect: perform USB PHY and LINK reset
  *              on USB cable disconnection.
+ * @swfi_latency: miminum latency to allow swfi.
  * @enable_dcd: Enable Data Contact Detection circuit. if not set
  *              wait for 600msec before proceeding to primary
  *              detection.
- * @enable_lpm_on_suspend: Enable the USB core to go into Low
- *              Power Mode, when USB bus is suspended but cable
- *              is connected.
- * @core_clk_always_on_workaround: Don't disable core_clk when
- *              USB enters LPM.
- * @delay_lpm_on_disconnect: Use a delay before entering LPM
- *              upon USB cable disconnection.
  * @bus_scale_table: parameters for bus bandwidth requirements
  */
 struct msm_otg_platform_data {
@@ -212,55 +176,12 @@ struct msm_otg_platform_data {
 	enum msm_usb_phy_type phy_type;
 	void (*setup_gpio)(enum usb_otg_state state);
 	int pmic_id_irq;
-	unsigned int mpm_otgsessvld_int;
 	bool mhl_enable;
 	bool disable_reset_on_disconnect;
+	u32 swfi_latency;
 	bool enable_dcd;
-	bool enable_lpm_on_dev_suspend;
-	bool core_clk_always_on_workaround;
-	bool delay_lpm_on_disconnect;
 	struct msm_bus_scale_pdata *bus_scale_table;
 };
-
-/* Timeout (in msec) values (min - max) associated with OTG timers */
-
-#define TA_WAIT_VRISE	100	/* ( - 100)  */
-#define TA_WAIT_VFALL	500	/* ( - 1000) */
-
-/*
- * This option is set for embedded hosts or OTG devices in which leakage
- * currents are very minimal.
- */
-#ifdef CONFIG_USB_OTG
-#define TA_WAIT_BCON	30000	/* (1100 - 30000) */
-#else
-#define TA_WAIT_BCON	-1
-#endif
-
-#define TA_AIDL_BDIS	500	/* (200 - ) */
-#define TA_BIDL_ADIS	155	/* (155 - 200) */
-#define TB_SRP_FAIL	6000	/* (5000 - 6000) */
-#define TB_ASE0_BRST	200	/* (155 - ) */
-
-/* TB_SSEND_SRP and TB_SE0_SRP are combined */
-#define TB_SRP_INIT	2000	/* (1500 - ) */
-
-#define TA_TST_MAINT	10100	/* (9900 - 10100) */
-#define TB_TST_SRP	3000	/* ( - 5000) */
-#define TB_TST_CONFIG	300
-
-/* Timeout variables */
-
-#define A_WAIT_VRISE	0
-#define A_WAIT_VFALL	1
-#define A_WAIT_BCON	2
-#define A_AIDL_BDIS	3
-#define A_BIDL_ADIS	4
-#define B_SRP_FAIL	5
-#define B_ASE0_BRST	6
-#define A_TST_MAINT	7
-#define B_TST_SRP	8
-#define B_TST_CONFIG	9
 
 /**
  * struct msm_otg: OTG driver data. Shared by HCD and DCD.
@@ -288,6 +209,8 @@ struct msm_otg_platform_data {
  *             connected. Useful only when ACA_A charger is
  *             connected.
  * @mA_port: The amount of current drawn by the attached B-device.
+ * @pm_qos_req_dma: miminum DMA latency to vote against idle power
+	collapse when cable is connected.
  * @id_timer: The timer used for polling ID line to detect ACA states.
  * @xo_handle: TCXO buffer handle
  * @bus_perf_client: Bus performance client handle to request BUS bandwidth
@@ -306,29 +229,13 @@ struct msm_otg {
 #define ID_A		2
 #define ID_B		3
 #define ID_C		4
-#define A_BUS_DROP	5
-#define A_BUS_REQ	6
-#define A_SRP_DET	7
-#define A_VBUS_VLD	8
-#define B_CONN		9
-#define ADP_CHANGE	10
-#define POWER_UP	11
-#define A_CLR_ERR	12
-#define A_BUS_RESUME	13
-#define A_BUS_SUSPEND	14
-#define A_CONN		15
-#define B_BUS_REQ	16
 	unsigned long inputs;
 	struct work_struct sm_work;
-	bool sm_work_pending;
-	atomic_t pm_suspended;
 	atomic_t in_lpm;
-	atomic_t suspend_work_pending;
 	int async_int;
 	unsigned cur_power;
 	struct delayed_work chg_work;
 	struct delayed_work pmic_id_status_work;
-	struct delayed_work suspend_work;
 	enum usb_chg_state chg_state;
 	enum usb_chg_type chg_type;
 	u8 dcd_retries;
@@ -342,7 +249,7 @@ struct msm_otg {
 	/*
 	 * Allowing PHY power collpase turns off the HSUSB 3.3v and 1.8v
 	 * analog regulators while going to low power mode.
-	 * Currently only 28nm PHY has the support to allowing PHY
+	 * Currently only 8960(28nm PHY) has the support to allowing PHY
 	 * power collapse since it doesn't have leakage currents while
 	 * turning off the power rails.
 	 */
@@ -352,139 +259,35 @@ struct msm_otg {
 	 * voltage regulator(VDDCX).
 	 */
 #define ALLOW_PHY_RETENTION		BIT(1)
-	  /*
-	   * Allow putting the core in Low Power mode, when
-	   * USB bus is suspended but cable is connected.
-	   */
-#define ALLOW_LPM_ON_DEV_SUSPEND	BIT(2)
-	/*
-	 * Allowing PHY regulators LPM puts the HSUSB 3.3v and 1.8v
-	 * analog regulators into LPM while going to USB low power mode.
-	 */
-#define ALLOW_PHY_REGULATORS_LPM	BIT(3)
 	unsigned long lpm_flags;
 #define PHY_PWR_COLLAPSED		BIT(0)
 #define PHY_RETENTIONED			BIT(1)
+	struct pm_qos_request_list pm_qos_req_dma;
 #define XO_SHUTDOWN			BIT(2)
-#define CLOCKS_DOWN			BIT(3)
-#define PHY_REGULATORS_LPM	BIT(4)
 	int reset_counter;
-	unsigned long b_last_se0_sess;
-	unsigned long tmouts;
-	u8 active_tmout;
-	struct hrtimer timer;
-	enum usb_vdd_type vdd_type;
 };
 
 struct msm_hsic_host_platform_data {
 	unsigned strobe;
 	unsigned data;
-	struct msm_bus_scale_pdata *bus_scale_table;
-	u32 swfi_latency;
+	unsigned hub_reset;
 };
 
-struct msm_usb_host_platform_data {
-	unsigned int power_budget;
-	unsigned int dock_connect_irq;
-};
-
-/**
- * struct msm_hsic_peripheral_platform_data: HSIC peripheral
- * platform data.
- * @core_clk_always_on_workaround: Don't disable core_clk when
- *                                 HSIC enters LPM.
- */
-struct msm_hsic_peripheral_platform_data {
-	bool core_clk_always_on_workaround;
-};
-
-enum usb_pipe_mem_type {
-	SPS_PIPE_MEM = 0,	/* Default, SPS dedicated pipe memory */
-	USB_PRIVATE_MEM,	/* USB's private memory */
-	SYSTEM_MEM,		/* System RAM, requires allocation */
-};
-
-/**
- * struct usb_bam_pipe_connect: pipe connection information
- * between USB/HSIC BAM and another BAM. USB/HSIC BAM can be
- * either src BAM or dst BAM
- * @src_phy_addr: src bam physical address.
- * @src_pipe_index: src bam pipe index.
- * @dst_phy_addr: dst bam physical address.
- * @dst_pipe_index: dst bam pipe index.
- * @mem_type: type of memory used for BAM FIFOs
- * @data_fifo_base_offset: data fifo offset.
- * @data_fifo_size: data fifo size.
- * @desc_fifo_base_offset: descriptor fifo offset.
- * @desc_fifo_size: descriptor fifo size.
- */
 struct usb_bam_pipe_connect {
 	u32 src_phy_addr;
-	u32 src_pipe_index;
+	int src_pipe_index;
 	u32 dst_phy_addr;
-	u32 dst_pipe_index;
-	enum usb_pipe_mem_type mem_type;
+	int dst_pipe_index;
 	u32 data_fifo_base_offset;
 	u32 data_fifo_size;
 	u32 desc_fifo_base_offset;
 	u32 desc_fifo_size;
 };
 
-/**
- * struct msm_usb_bam_platform_data: pipe connection information
- * between USB/HSIC BAM and another BAM. USB/HSIC BAM can be
- * either src BAM or dst BAM
- * @connections: holds all pipe connections data.
- * @usb_active_bam: set USB or HSIC as the active BAM.
- * @usb_bam_num_pipes: max number of pipes to use.
- * @active_conn_num: number of active pipe connections.
- * @usb_base_address: BAM physical address.
- */
 struct msm_usb_bam_platform_data {
 	struct usb_bam_pipe_connect *connections;
-	int usb_active_bam;
+	unsigned long usb_bam_phy_base;
+	unsigned long usb_bam_phy_size;
 	int usb_bam_num_pipes;
-	u32 total_bam_num;
-	u32 usb_base_address;
 };
-
-enum usb_bam {
-	SSUSB_BAM = 0,
-	HSUSB_BAM,
-	HSIC_BAM,
-	MAX_BAMS,
-};
-
-#ifdef CONFIG_USB_CI13XXX_MSM
-void msm_hw_bam_disable(bool bam_disable);
-
-#else
-static inline void msm_hw_bam_disable(bool bam_disable)
-{
-}
-#endif
-
-#ifdef CONFIG_USB_DWC3_MSM
-int msm_ep_config(struct usb_ep *ep);
-int msm_ep_unconfig(struct usb_ep *ep);
-int msm_data_fifo_config(struct usb_ep *ep, u32 addr, u32 size,
-	u8 dst_pipe_idx);
-
-#else
-static inline int msm_data_fifo_config(struct usb_ep *ep, u32 addr, u32 size,
-	u8 dst_pipe_idx)
-{
-	return -ENODEV;
-}
-
-static inline int msm_ep_config(struct usb_ep *ep)
-{
-	return -ENODEV;
-}
-
-static inline int msm_ep_unconfig(struct usb_ep *ep)
-{
-	return -ENODEV;
-}
-#endif
 #endif

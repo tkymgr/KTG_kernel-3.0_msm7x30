@@ -2,7 +2,8 @@
  *  arch/arm/include/asm/domain.h
  *
  *  Copyright (C) 1999 Russell King.
- *  Copyright (c) 2009, The Linux Foundation. All rights reserved.
+ *  Copyright (c) 2009, Code Aurora Forum. All rights reserved.
+ *  KTG modified for Xperia 2011
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -51,11 +52,7 @@
  */
 #define DOMAIN_NOACCESS	0
 #define DOMAIN_CLIENT	1
-#ifdef CONFIG_CPU_USE_DOMAINS
 #define DOMAIN_MANAGER	3
-#else
-#define DOMAIN_MANAGER	1
-#endif
 
 #define domain_val(dom,type)	((type) << (2*(dom)))
 

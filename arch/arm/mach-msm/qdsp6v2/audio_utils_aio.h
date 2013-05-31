@@ -27,7 +27,8 @@
 #include <linux/ion.h>
 #include <asm/ioctls.h>
 #include <asm/atomic.h>
-#include "q6audio_common.h"
+#include <sound/q6asm.h>
+#include <sound/apr_audio.h>
 
 #define TUNNEL_MODE     0x0000
 #define NON_TUNNEL_MODE 0x0001
@@ -189,12 +190,6 @@ struct q6audio_aio {
 	long (*codec_ioctl)(struct file *, unsigned int, unsigned long);
 };
 
-void audio_aio_async_write_ack(struct q6audio_aio *audio, uint32_t token,
-				uint32_t *payload);
-
-void audio_aio_async_read_ack(struct q6audio_aio *audio, uint32_t token,
-			uint32_t *payload);
-
 int audio_aio_open(struct q6audio_aio *audio, struct file *file);
 int audio_aio_enable(struct q6audio_aio  *audio);
 void audio_aio_post_event(struct q6audio_aio *audio, int type,
@@ -202,6 +197,8 @@ void audio_aio_post_event(struct q6audio_aio *audio, int type,
 int audio_aio_release(struct inode *inode, struct file *file);
 long audio_aio_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int audio_aio_fsync(struct file *file, int datasync);
+void audio_aio_cb(uint32_t opcode, uint32_t token,
+			uint32_t *payload,  struct q6audio_aio *audio);
 void audio_aio_async_out_flush(struct q6audio_aio *audio);
 void audio_aio_async_in_flush(struct q6audio_aio *audio);
 #ifdef CONFIG_DEBUG_FS

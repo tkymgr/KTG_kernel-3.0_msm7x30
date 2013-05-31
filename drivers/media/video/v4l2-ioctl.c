@@ -244,8 +244,6 @@ static const char *v4l2_ioctls[] = {
 	[_IOC_NR(VIDIOC_ENCODER_CMD)] 	   = "VIDIOC_ENCODER_CMD",
 	[_IOC_NR(VIDIOC_TRY_ENCODER_CMD)]  = "VIDIOC_TRY_ENCODER_CMD",
 
-	[_IOC_NR(VIDIOC_DECODER_CMD)]	   = "VIDIOC_DECODER_CMD",
-	[_IOC_NR(VIDIOC_TRY_DECODER_CMD)]  = "VIDIOC_TRY_DECODER_CMD",
 	[_IOC_NR(VIDIOC_DBG_S_REGISTER)]   = "VIDIOC_DBG_S_REGISTER",
 	[_IOC_NR(VIDIOC_DBG_G_REGISTER)]   = "VIDIOC_DBG_G_REGISTER",
 
@@ -261,8 +259,6 @@ static const char *v4l2_ioctls[] = {
 	[_IOC_NR(VIDIOC_DQEVENT)]	   = "VIDIOC_DQEVENT",
 	[_IOC_NR(VIDIOC_SUBSCRIBE_EVENT)]  = "VIDIOC_SUBSCRIBE_EVENT",
 	[_IOC_NR(VIDIOC_UNSUBSCRIBE_EVENT)] = "VIDIOC_UNSUBSCRIBE_EVENT",
-	[_IOC_NR(VIDIOC_CREATE_BUFS)]      = "VIDIOC_CREATE_BUFS",
-	[_IOC_NR(VIDIOC_PREPARE_BUF)]      = "VIDIOC_PREPARE_BUF",
 };
 #define V4L2_IOCTLS ARRAY_SIZE(v4l2_ioctls)
 
@@ -1777,28 +1773,6 @@ static long __video_do_ioctl(struct file *file,
 			dbgarg(cmd, "cmd=%d, flags=%x\n", p->cmd, p->flags);
 		break;
 	}
-	case VIDIOC_DECODER_CMD:
-	{
-		struct v4l2_decoder_cmd *p = arg;
-
-		if (!ops->vidioc_decoder_cmd)
-			break;
-		ret = ops->vidioc_decoder_cmd(file, fh, p);
-		if (!ret)
-			dbgarg(cmd, "cmd=%d, flags=%x\n", p->cmd, p->flags);
-		break;
-	}
-	case VIDIOC_TRY_DECODER_CMD:
-	{
-		struct v4l2_decoder_cmd *p = arg;
-
-		if (!ops->vidioc_try_decoder_cmd)
-			break;
-		ret = ops->vidioc_try_decoder_cmd(file, fh, p);
-		if (!ret)
-			dbgarg(cmd, "cmd=%d, flags=%x\n", p->cmd, p->flags);
-		break;
-	}
 	case VIDIOC_G_PARM:
 	{
 		struct v4l2_streamparm *p = arg;
@@ -2222,40 +2196,6 @@ static long __video_do_ioctl(struct file *file,
 		dbgarg(cmd, "type=0x%8.8x", sub->type);
 		break;
 	}
-	case VIDIOC_CREATE_BUFS:
-	{
-		struct v4l2_create_buffers *create = arg;
-
-		if (!ops->vidioc_create_bufs)
-			break;
-		/*if (ret_prio) {
-			ret = ret_prio;
-			break;
-		}*/
-		ret = check_fmt(ops, create->format.type);
-		if (ret)
-			break;
-
-		ret = ops->vidioc_create_bufs(file, fh, create);
-
-		dbgarg(cmd, "count=%d @ %d\n", create->count, create->index);
-		break;
-	}
-	case VIDIOC_PREPARE_BUF:
-	{
-		struct v4l2_buffer *b = arg;
-
-		if (!ops->vidioc_prepare_buf)
-			break;
-		ret = check_fmt(ops, b->type);
-		if (ret)
-			break;
-
-		ret = ops->vidioc_prepare_buf(file, fh, b);
-
-		dbgarg(cmd, "index=%d", b->index);
-		break;
-	}
 	default:
 	{
 		bool valid_prio = true;
@@ -2349,10 +2289,6 @@ static int check_array_args(unsigned int cmd, void *parg, size_t *array_size,
 		struct v4l2_ext_controls *ctrls = parg;
 
 		if (ctrls->count != 0) {
-			if (ctrls->count > V4L2_CID_MAX_CTRLS) {
-				ret = -EINVAL;
-				break;
-			}
 			*user_ptr = (void __user *)ctrls->controls;
 			*kernel_ptr = (void **)&ctrls->controls;
 			*array_size = sizeof(struct v4l2_ext_control)

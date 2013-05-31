@@ -651,26 +651,6 @@ static void armpmu_update_counters(void)
 	}
 }
 
-static int cpu_has_active_perf(void)
-{
-	int idx;
-	struct cpu_hw_events *cpuc = &__get_cpu_var(cpu_hw_events);
-
-	if (!armpmu)
-		return 0;
-
-	for (idx = 0; idx <= armpmu->num_events; ++idx) {
-		struct perf_event *event = cpuc->events[idx];
-
-		if (event)
-			/*Even one event's existence is good enough.*/
-			return 1;
-
-	}
-
-	return 0;
-}
-
 static struct pmu pmu = {
 	.pmu_enable	= armpmu_enable,
 	.pmu_disable	= armpmu_disable,
@@ -696,18 +676,16 @@ static int perf_cpu_pm_notifier(struct notifier_block *self, unsigned long cmd,
 {
 	switch (cmd) {
 	case CPU_PM_ENTER:
-		if (cpu_has_active_perf()) {
-			armpmu_update_counters();
-			perf_pmu_disable(&pmu);
-		}
+		armpmu_update_counters();
+		perf_pmu_disable(&pmu);
 		break;
 
 	case CPU_PM_ENTER_FAILED:
 	case CPU_PM_EXIT:
-		if (cpu_has_active_perf() && armpmu->reset) {
+		if (armpmu && armpmu->reset)
 			armpmu->reset(NULL);
-			perf_pmu_enable(&pmu);
-		}
+		perf_pmu_enable(&pmu);
+
 		break;
 	}
 
@@ -785,7 +763,6 @@ init_hw_perf_events(void)
 			break;
 		case 0x0490:    /* 8960 sim */
 		case 0x04D0:    /* 8960 */
-		case 0x06F0:    /* 8064 */
 			armpmu = armv7_krait_pmu_init();
 			krait_l2_pmu_init();
 			break;

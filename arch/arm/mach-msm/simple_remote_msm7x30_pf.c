@@ -1242,7 +1242,7 @@ static int simple_remote_pf_enable_hp_amp(u8 enable)
 
 		simple_remote_pf_enable_vregs(1);
 
-		adie_codec_powerup(1);
+		//adie_codec_powerup(1); @nAa
 
 		if (0 > marimba_read(&config, 0x33,
 				     &loc_dat->x33_orig_val, 1)) {
@@ -1370,7 +1370,7 @@ static int simple_remote_pf_enable_hp_amp(u8 enable)
 			goto error;
 		}
 
-		adie_codec_powerup(0);
+		//adie_codec_powerup(0); @nAa
 		simple_remote_pf_enable_vregs(0);
 		loc_dat->hpamp_enabled = false;
 	}
@@ -1516,7 +1516,7 @@ static int simple_remote_pf_register_hssd_button_interrupt(irq_handler_t func,
 						    void *data)
 {
 	int err;
-
+printk(KERN_ERR "simple_remote_pf_register_hssd_button_interrupt 1\n");
 	dev_dbg(loc_dat->dev, "%s - Setting btn_det IRQ handler\n", __func__);
 
 

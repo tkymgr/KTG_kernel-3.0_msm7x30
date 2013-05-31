@@ -91,7 +91,7 @@ static const char	hcd_name [] = "ehci_hcd";
  */
 #define	EHCI_TUNE_FLS		1	/* (medium) 512-frame schedule */
 
-#define EHCI_IAA_MSECS		100		/* arbitrary */
+#define EHCI_IAA_MSECS		10		/* arbitrary */
 #define EHCI_IO_JIFFIES		(HZ/10)		/* io watchdog > irq_thresh */
 #define EHCI_ASYNC_JIFFIES	(HZ/20)		/* async idle timeout */
 #define EHCI_SHRINK_JIFFIES	(DIV_ROUND_UP(HZ, 200) + 1)
@@ -632,8 +632,6 @@ static int ehci_init(struct usb_hcd *hcd)
 	hw->hw_alt_next = QTD_NEXT(ehci, ehci->async->dummy->qtd_dma);
 
 	/* clear interrupt enables, set irq latency */
-	log2_irq_thresh = ehci->log2_irq_thresh;
-
 	if (log2_irq_thresh < 0 || log2_irq_thresh > 6)
 		log2_irq_thresh = 0;
 	temp = 1 << (16 + log2_irq_thresh);
@@ -776,35 +774,6 @@ static int __maybe_unused ehci_run (struct usb_hcd *hcd)
 	return 0;
 }
 
-static int __maybe_unused ehci_setup (struct usb_hcd *hcd)
-{
-	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
-	int retval;
-
-	ehci->regs = (void __iomem *)ehci->caps +
-	    HC_LENGTH(ehci, ehci_readl(ehci, &ehci->caps->hc_capbase));
-	dbg_hcs_params(ehci, "reset");
-	dbg_hcc_params(ehci, "reset");
-
-	/* cache this readonly data; minimize chip reads */
-	ehci->hcs_params = ehci_readl(ehci, &ehci->caps->hcs_params);
-
-	ehci->sbrn = HCD_USB2;
-
-	retval = ehci_halt(ehci);
-	if (retval)
-		return retval;
-
-	/* data structure init */
-	retval = ehci_init(hcd);
-	if (retval)
-		return retval;
-
-	ehci_reset(ehci);
-
-	return 0;
-}
-
 /*-------------------------------------------------------------------------*/
 
 static irqreturn_t ehci_irq (struct usb_hcd *hcd)
@@ -891,12 +860,6 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 			pstatus = ehci_readl(ehci,
 					 &ehci->regs->port_status[i]);
 
-			/*set RS bit in case of remote wakeup*/
-			if (ehci_is_TDI(ehci) && !(cmd & CMD_RUN) &&
-					(pstatus & PORT_SUSPEND))
-				ehci_writel(ehci, cmd | CMD_RUN,
-						&ehci->regs->command);
-
 			if (pstatus & PORT_OWNER)
 				continue;
 			if (!(test_bit(i, &ehci->suspended_ports) &&
@@ -920,9 +883,6 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 	/* PCI errors [4.15.2.4] */
 	if (unlikely ((status & STS_FATAL) != 0)) {
 		ehci_err(ehci, "fatal error\n");
-		if (hcd->driver->dump_regs)
-			hcd->driver->dump_regs(hcd);
-		panic("System error\n");
 		dbg_cmd(ehci, "fatal", cmd);
 		dbg_status(ehci, "fatal", status);
 		ehci_halt(ehci);
@@ -1212,7 +1172,8 @@ ehci_endpoint_reset(struct usb_hcd *hcd, struct usb_host_endpoint *ep)
 static int ehci_get_frame (struct usb_hcd *hcd)
 {
 	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
-	return (ehci_read_frame_index(ehci) >> 3) % ehci->periodic_size;
+	return (ehci_readl(ehci, &ehci->regs->frame_index) >> 3) %
+		ehci->periodic_size;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1313,7 +1274,6 @@ MODULE_LICENSE ("GPL");
 
 #ifdef CONFIG_USB_EHCI_MSM
 #include "ehci-msm.c"
-#include "ehci-msm2.c"
 #define PLATFORM_DRIVER_PRESENT
 #endif
 
@@ -1431,11 +1391,7 @@ static struct platform_driver *plat_drivers[]  = {
 #endif
 
 #ifdef CONFIG_USB_EHCI_MSM_HSIC
-	&ehci_msm_hsic_driver,
-#endif
-
-#ifdef CONFIG_USB_EHCI_MSM
-	&ehci_msm2_driver,
+	&ehci_msm_hsic_driver
 #endif
 
 };

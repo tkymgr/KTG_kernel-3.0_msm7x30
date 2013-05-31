@@ -237,7 +237,7 @@ static int smd_tty_open(struct tty_struct *tty, struct file *f)
 	int res = 0;
 	unsigned int n = tty->index;
 	struct smd_tty_info *info;
-	const char *peripheral = NULL;
+	char *peripheral = NULL;
 
 
 	if (n >= MAX_SMD_TTYS || !smd_tty[n].smd)
@@ -249,7 +249,9 @@ static int smd_tty_open(struct tty_struct *tty, struct file *f)
 	tty->driver_data = info;
 
 	if (info->open_count++ == 0) {
-		peripheral = smd_edge_to_subsystem(smd_tty[n].smd->edge);
+		if (smd_tty[n].smd->edge == SMD_APPS_MODEM)
+			peripheral = "modem";
+
 		if (peripheral) {
 			info->pil = pil_get(peripheral);
 			if (IS_ERR(info->pil)) {
@@ -489,8 +491,7 @@ static int smd_tty_dummy_probe(struct platform_device *pdev)
 		if (!smd_configs[n].dev_name)
 			continue;
 
-		if (pdev->id == smd_configs[n].edge &&
-			!strncmp(pdev->name, smd_configs[n].dev_name,
+		if (!strncmp(pdev->name, smd_configs[n].dev_name,
 					SMD_MAX_CH_NAME_LEN)) {
 			complete_all(&smd_tty[idx].ch_allocated);
 			return 0;

@@ -55,37 +55,10 @@ static struct gpiomux_setting gsbi3_active_cfg = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
-static struct gpiomux_setting external_vfr[] = {
-	/* Suspended state */
-	{
-		.func = GPIOMUX_FUNC_3,
-		.drv = GPIOMUX_DRV_2MA,
-		.pull = GPIOMUX_PULL_KEEPER,
-	},
-	/* Active state */
-	{
-		.func = GPIOMUX_FUNC_3,
-		.drv = GPIOMUX_DRV_2MA,
-		.pull = GPIOMUX_PULL_KEEPER,
-	},
-};
-
-static struct gpiomux_setting gsbi_uart = {
+static struct gpiomux_setting gsbi5 = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_NONE,
-};
-
-static struct gpiomux_setting gsbi9_active_cfg = {
-	.func = GPIOMUX_FUNC_2,
-	.drv = GPIOMUX_DRV_8MA,
-	.pull = GPIOMUX_PULL_DOWN,
-};
-
-static struct gpiomux_setting gsbi9_suspended_cfg = {
-	.func = GPIOMUX_FUNC_2,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_DOWN,
 };
 
 static struct gpiomux_setting gsbi10 = {
@@ -237,7 +210,7 @@ static struct gpiomux_setting mdm2ap_errfatal_cfg = {
 static struct gpiomux_setting ap2mdm_kpdpwr_n_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_8MA,
-	.pull = GPIOMUX_PULL_DOWN,
+	.pull = GPIOMUX_PULL_NONE,
 };
 
 static struct gpiomux_setting mdp_vsync_suspend_cfg = {
@@ -271,7 +244,6 @@ static struct gpiomux_setting hdmi_active_2_cfg = {
 	.pull = GPIOMUX_PULL_DOWN,
 };
 
-#if defined(CONFIG_FB_MSM_HDMI_MHL_8334) || defined(CONFIG_FB_MSM_HDMI_MHL_9244)
 static struct gpiomux_setting hdmi_active_3_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
@@ -285,7 +257,6 @@ static struct gpiomux_setting hdmi_active_4_cfg = {
 	.pull = GPIOMUX_PULL_UP,
 	.dir = GPIOMUX_OUT_HIGH,
 };
-#endif
 #endif
 
 #if defined(CONFIG_KS8851) || defined(CONFIG_KS8851_MODULE)
@@ -304,37 +275,6 @@ static struct msm_gpiomux_config msm8960_ethernet_configs[] = {
 	},
 };
 #endif
-
-static struct msm_gpiomux_config msm8960_fusion_gsbi_configs[] = {
-	{
-		.gpio = 93,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi9_suspended_cfg,
-			[GPIOMUX_ACTIVE] = &gsbi9_active_cfg,
-		}
-	},
-	{
-		.gpio = 94,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi9_suspended_cfg,
-			[GPIOMUX_ACTIVE] = &gsbi9_active_cfg,
-		}
-	},
-	{
-		.gpio = 95,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi9_suspended_cfg,
-			[GPIOMUX_ACTIVE] = &gsbi9_active_cfg,
-		}
-	},
-	{
-		.gpio = 96,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi9_suspended_cfg,
-			[GPIOMUX_ACTIVE] = &gsbi9_active_cfg,
-		}
-	},
-};
 
 static struct msm_gpiomux_config msm8960_gsbi_configs[] __initdata = {
 	{
@@ -387,6 +327,30 @@ static struct msm_gpiomux_config msm8960_gsbi_configs[] __initdata = {
 		},
 	},
 	{
+		.gpio      = 22,	/* GSBI5 UART2 */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gsbi5,
+		},
+	},
+	{
+		.gpio      = 23,	/* GSBI5 UART2 */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gsbi5,
+		},
+	},
+	{
+		.gpio      = 24,	/* GSBI5 UART2 */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gsbi5,
+		},
+	},
+	{
+		.gpio      = 25,	/* GSBI5 UART2 */
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &gsbi5,
+		},
+	},
+	{
 		.gpio      = 44,	/* GSBI12 I2C QUP SDA */
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gsbi12,
@@ -408,70 +372,6 @@ static struct msm_gpiomux_config msm8960_gsbi_configs[] __initdata = {
 		.gpio      = 74,	/* GSBI10 I2C QUP SCL */
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gsbi10,
-		},
-	},
-};
-
-static struct msm_gpiomux_config msm8960_gsbi5_uart_configs[] __initdata = {
-	{
-		.gpio      = 22,        /* GSBI5 UART2 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-	{
-		.gpio      = 23,        /* GSBI5 UART2 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-	{
-		.gpio      = 24,        /* GSBI5 UART2 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-	{
-		.gpio      = 25,        /* GSBI5 UART2 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-};
-
-static struct msm_gpiomux_config msm8960_external_vfr_configs[] __initdata = {
-	{
-		.gpio      = 23,        /* EXTERNAL VFR */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &external_vfr[0],
-			[GPIOMUX_ACTIVE] = &external_vfr[1],
-		},
-	},
-};
-
-static struct msm_gpiomux_config msm8960_gsbi8_uart_configs[] __initdata = {
-	{
-		.gpio      = 34,        /* GSBI8 UART3 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-	{
-		.gpio      = 35,        /* GSBI8 UART3 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-	{
-		.gpio      = 36,        /* GSBI8 UART3 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
-		},
-	},
-	{
-		.gpio      = 37,        /* GSBI8 UART3 */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &gsbi_uart,
 		},
 	},
 };
@@ -609,9 +509,6 @@ static struct msm_gpiomux_config msm8960_hsic_configs[] = {
 			[GPIOMUX_SUSPENDED] = &hsic_sus_cfg,
 		},
 	},
-};
-
-static struct msm_gpiomux_config msm8960_hsic_hub_configs[] = {
 	{
 		.gpio = 91,               /* HSIC_HUB_RESET */
 		.settings = {
@@ -710,56 +607,49 @@ static struct msm_gpiomux_config hap_lvl_shft_config[] __initdata = {
 	},
 };
 
-static struct msm_gpiomux_config sglte_configs[] __initdata = {
+static struct msm_gpiomux_config mdm_configs[] __initdata = {
 	/* AP2MDM_STATUS */
 	{
-		.gpio = 77,
+		.gpio = 94,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
 		}
 	},
 	/* MDM2AP_STATUS */
 	{
-		.gpio = 24,
+		.gpio = 69,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &mdm2ap_status_cfg,
 		}
 	},
 	/* MDM2AP_ERRFATAL */
 	{
-		.gpio = 40,
+		.gpio = 70,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &mdm2ap_errfatal_cfg,
 		}
 	},
 	/* AP2MDM_ERRFATAL */
 	{
-		.gpio = 80,
+		.gpio = 95,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
 		}
 	},
 	/* AP2MDM_KPDPWR_N */
 	{
-		.gpio = 79,
+		.gpio = 81,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ap2mdm_kpdpwr_n_cfg,
 		}
 	},
-	/* AP2MDM_PMIC_PWR_EN */
+	/* AP2MDM_PMIC_RESET_N */
 	{
-		.gpio = 22,
+		.gpio = 80,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ap2mdm_kpdpwr_n_cfg,
 		}
-	},
-	/* AP2MDM_SOFT_RESET */
-	{
-		.gpio = 78,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
-		}
-	},
+	}
 };
 
 static struct msm_gpiomux_config msm8960_mdp_vsync_configs[] __initdata = {
@@ -802,7 +692,6 @@ static struct msm_gpiomux_config msm8960_hdmi_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &hdmi_suspend_cfg,
 		},
 	},
-#ifdef CONFIG_FB_MSM_HDMI_MHL_9244
 		{
 		.gpio = 15,
 		.settings = {
@@ -817,23 +706,6 @@ static struct msm_gpiomux_config msm8960_hdmi_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &hdmi_suspend_cfg,
 		},
 	},
-#endif
-#ifdef CONFIG_FB_MSM_HDMI_MHL_8334
-		{
-		.gpio = 4,
-		.settings = {
-			[GPIOMUX_ACTIVE]    = &hdmi_active_3_cfg,
-			[GPIOMUX_SUSPENDED] = &hdmi_suspend_cfg,
-		},
-	},
-	{
-		.gpio = 15,
-		.settings = {
-			[GPIOMUX_ACTIVE]    = &hdmi_active_4_cfg,
-			[GPIOMUX_SUSPENDED] = &hdmi_suspend_cfg,
-		},
-	},
-#endif /* CONFIG_FB_MSM_HDMI_MHL */
 };
 #endif
 
@@ -955,16 +827,15 @@ int __init msm8960_init_gpiomux(void)
 		msm_gpiomux_install(hap_lvl_shft_config,
 			ARRAY_SIZE(hap_lvl_shft_config));
 
+	if (PLATFORM_IS_CHARM25())
+		msm_gpiomux_install(mdm_configs,
+			ARRAY_SIZE(mdm_configs));
+
 #ifdef CONFIG_USB_EHCI_MSM_HSIC
 	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 1) &&
-		machine_is_msm8960_liquid())
+		(PLATFORM_IS_CHARM25() || machine_is_msm8960_liquid()))
 		msm_gpiomux_install(msm8960_hsic_configs,
 			ARRAY_SIZE(msm8960_hsic_configs));
-
-	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 1) &&
-			machine_is_msm8960_liquid())
-		msm_gpiomux_install(msm8960_hsic_hub_configs,
-			ARRAY_SIZE(msm8960_hsic_hub_configs));
 #endif
 
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
@@ -975,30 +846,10 @@ int __init msm8960_init_gpiomux(void)
 	msm_gpiomux_install(msm8960_mdp_vsync_configs,
 			ARRAY_SIZE(msm8960_mdp_vsync_configs));
 
-	if (socinfo_get_platform_subtype() == PLATFORM_SUBTYPE_SGLTE)
-		msm_gpiomux_install(msm8960_gsbi8_uart_configs,
-			ARRAY_SIZE(msm8960_gsbi8_uart_configs));
-	else
-		msm_gpiomux_install(msm8960_gsbi5_uart_configs,
-			ARRAY_SIZE(msm8960_gsbi5_uart_configs));
-
-	if (socinfo_get_platform_subtype() == PLATFORM_SUBTYPE_SGLTE) {
-		/* For 8960 Fusion 2.2 Primary IPC */
-		msm_gpiomux_install(msm8960_fusion_gsbi_configs,
-			ARRAY_SIZE(msm8960_fusion_gsbi_configs));
-		/* For SGLTE 8960 Fusion External VFR */
-		msm_gpiomux_install(msm8960_external_vfr_configs,
-			ARRAY_SIZE(msm8960_external_vfr_configs));
-	}
-
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
 	msm_gpiomux_install(msm8960_sdcc2_configs,
 		ARRAY_SIZE(msm8960_sdcc2_configs));
 #endif
-
-	if (socinfo_get_platform_subtype() == PLATFORM_SUBTYPE_SGLTE)
-		msm_gpiomux_install(sglte_configs,
-			ARRAY_SIZE(sglte_configs));
 
 	return 0;
 }

@@ -2,7 +2,7 @@
  *  linux/drivers/mmc/host/msmsdcc.h - QCT MSM7K SDC Controller
  *
  *  Copyright (C) 2008 Google, All Rights Reserved.
- *  Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+ *  Copyright (c) 2009-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -78,7 +78,6 @@
 #define MCI_DPSM_DIRECTION	(1 << 1)
 #define MCI_DPSM_MODE		(1 << 2)
 #define MCI_DPSM_DMAENABLE	(1 << 3)
-#define MCI_DATA_PEND		(1 << 17)
 #define MCI_AUTO_PROG_DONE	(1 << 19)
 #define MCI_RX_DATA_PEND	(1 << 20)
 
@@ -213,7 +212,10 @@
 
 #define MSM_MMC_DEFAULT_IDLE_TIMEOUT	5000 /* msecs */
 
-/* Set the request timeout to 10secs */
+/*
+ * Set the request timeout to 10secs to allow
+ * bad cards/controller to respond.
+ */
 #define MSM_MMC_REQ_TIMEOUT	10000 /* msecs */
 #define MSM_MMC_DISABLE_TIMEOUT        200 /* msecs */
 
@@ -295,7 +297,6 @@ struct msmsdcc_curr_req {
 	int			got_dataend;
 	bool			wait_for_auto_prog_done;
 	bool			got_auto_prog_done;
-	bool			use_wr_data_pend;
 	int			user_pages;
 	u32			req_tout_ms;
 };
@@ -319,7 +320,6 @@ struct msmsdcc_sps_data {
 	unsigned int			busy;
 	unsigned int			xfer_req_cnt;
 	bool				pipe_reset_pending;
-	bool				reset_device;
 	struct tasklet_struct		tlet;
 };
 
@@ -394,30 +394,27 @@ struct msmsdcc_host {
 	unsigned int	dummy_52_needed;
 	unsigned int	dummy_52_sent;
 
+	bool		is_resumed;
 	struct wake_lock	sdio_wlock;
 	struct wake_lock	sdio_suspend_wlock;
 	struct timer_list req_tout_timer;
 	unsigned long reg_write_delay;
 	bool io_pad_pwr_switch;
-	bool tuning_in_progress;
+	bool cmd19_tuning_in_progress;
 	bool tuning_needed;
-	bool en_auto_cmd19;
 	bool sdio_gpio_lpm;
 	bool irq_wake_enabled;
 	struct pm_qos_request_list pm_qos_req_dma;
-	u32 cpu_dma_latency;
 	bool sdcc_suspending;
 	bool sdcc_irq_disabled;
 	bool sdcc_suspended;
 	bool sdio_wakeupirq_disabled;
-	struct mutex clk_mutex;
 	bool pending_resume;
 	unsigned int idle_tout_ms;			/* Timeout in msecs */
 	struct msmsdcc_msm_bus_vote msm_bus_vote;
 	struct device_attribute	max_bus_bw;
 	struct device_attribute	polling;
 	struct device_attribute idle_timeout;
-	struct device_attribute auto_cmd19_attr;
 };
 
 int msmsdcc_set_pwrsave(struct mmc_host *mmc, int pwrsave);

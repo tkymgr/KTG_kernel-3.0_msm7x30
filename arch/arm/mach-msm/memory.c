@@ -39,14 +39,14 @@
 #include <../../mm/mm.h>
 #include <linux/fmem.h>
 
-#if defined(CONFIG_ARCH_MSM7X27)
-static void *strongly_ordered_page;
-static char strongly_ordered_mem[PAGE_SIZE*2-4];
+void *strongly_ordered_page;
+char strongly_ordered_mem[PAGE_SIZE*2-4];
 
-void __init map_page_strongly_ordered(void)
+void map_page_strongly_ordered(void)
 {
+#if defined(CONFIG_ARCH_MSM7X27) && !defined(CONFIG_ARCH_MSM7X27A)
 	long unsigned int phys;
-	struct map_desc map[1];
+	struct map_desc map;
 
 	if (strongly_ordered_page)
 		return;
@@ -54,26 +54,33 @@ void __init map_page_strongly_ordered(void)
 	strongly_ordered_page = (void*)PFN_ALIGN((int)&strongly_ordered_mem);
 	phys = __pa(strongly_ordered_page);
 
-	map[0].pfn = __phys_to_pfn(phys);
-	map[0].virtual = MSM_STRONGLY_ORDERED_PAGE;
-	map[0].length = PAGE_SIZE;
-	map[0].type = MT_DEVICE_STRONGLY_ORDERED;
-	iotable_init(map, ARRAY_SIZE(map));
+	map.pfn = __phys_to_pfn(phys);
+	map.virtual = MSM_STRONGLY_ORDERED_PAGE;
+	map.length = PAGE_SIZE;
+	map.type = MT_DEVICE_STRONGLY_ORDERED;
+	create_mapping(&map);
 
 	printk(KERN_ALERT "Initialized strongly ordered page successfully\n");
-}
-#else
-void map_page_strongly_ordered(void) { }
 #endif
+}
+EXPORT_SYMBOL(map_page_strongly_ordered);
 
-#if defined(CONFIG_ARCH_MSM7X27)
 void write_to_strongly_ordered_memory(void)
 {
+#if defined(CONFIG_ARCH_MSM7X27) && !defined(CONFIG_ARCH_MSM7X27A)
+	if (!strongly_ordered_page) {
+		if (!in_interrupt())
+			map_page_strongly_ordered();
+		else {
+			printk(KERN_ALERT "Cannot map strongly ordered page in "
+				"Interrupt Context\n");
+			/* capture it here before the allocation fails later */
+			BUG();
+		}
+	}
 	*(int *)MSM_STRONGLY_ORDERED_PAGE = 0;
-}
-#else
-void write_to_strongly_ordered_memory(void) { }
 #endif
+}
 EXPORT_SYMBOL(write_to_strongly_ordered_memory);
 
 /* These cache related routines make the assumption (if outer cache is
@@ -101,7 +108,7 @@ void invalidate_caches(unsigned long vstart,
 	outer_inv_range(pstart, pstart + length);
 }
 
-void * __init alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
+void *alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
 {
 	void *unused_addr = NULL;
 	unsigned long addr, tmp_size, unused_size;
@@ -272,8 +279,6 @@ static void __init reserve_memory_for_mempools(void)
 			if (size >= mt->size) {
 				size = stable_size(mb,
 					reserve_info->low_unstable_address);
-				if (!size)
-					continue;
 				/* mt->size may be larger than size, all this
 				 * means is that we are carving the memory pool
 				 * out of multiple contiguous memory banks.
@@ -285,6 +290,27 @@ static void __init reserve_memory_for_mempools(void)
 			}
 		}
 	}
+}
+
+unsigned long __init reserve_memory_for_fmem(unsigned long fmem_size, 
+						unsigned long align)
+{
+	struct membank *mb;
+	int ret;
+	unsigned long fmem_phys;
+
+	if (!fmem_size)
+		return 0;
+
+	mb = &meminfo.bank[meminfo.nr_banks - 1];
+	
+	fmem_phys = mb->start + (mb->size - fmem_size);
+	fmem_phys = ALIGN(fmem_phys-align+1, align);
+	ret = memblock_remove(fmem_phys, fmem_size);
+	BUG_ON(ret);
+
+	pr_info("fmem start %lx size %lx\n", fmem_phys, fmem_size);
+	return fmem_phys;
 }
 
 static void __init initialize_mempools(void)
@@ -304,8 +330,6 @@ static void __init initialize_mempools(void)
 	}
 }
 
-#define  MAX_FIXED_AREA_SIZE 0x11000000
-
 void __init msm_reserve(void)
 {
 	unsigned long msm_fixed_area_size;
@@ -317,10 +341,7 @@ void __init msm_reserve(void)
 	msm_fixed_area_size = reserve_info->fixed_area_size;
 	msm_fixed_area_start = reserve_info->fixed_area_start;
 	if (msm_fixed_area_size)
-		if (msm_fixed_area_start > reserve_info->low_unstable_address
-			- MAX_FIXED_AREA_SIZE)
-			reserve_info->low_unstable_address =
-			msm_fixed_area_start;
+		reserve_info->low_unstable_address = msm_fixed_area_start;
 
 	calculate_reserve_limits();
 	adjust_reserve_sizes();

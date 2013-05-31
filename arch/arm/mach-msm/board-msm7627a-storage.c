@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -74,17 +74,17 @@ static struct msm_gpio sdc2_cfg_data[] = {
 };
 
 static struct msm_gpio sdc2_sleep_cfg_data[] = {
-	{GPIO_CFG(62, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+	{GPIO_CFG(62, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc2_clk"},
-	{GPIO_CFG(63, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(63, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc2_cmd"},
-	{GPIO_CFG(64, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(64, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc2_dat_3"},
-	{GPIO_CFG(65, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(65, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc2_dat_2"},
-	{GPIO_CFG(66, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(66, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc2_dat_1"},
-	{GPIO_CFG(67, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(67, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc2_dat_0"},
 };
 static struct msm_gpio sdc3_cfg_data[] = {
@@ -150,10 +150,7 @@ static struct sdcc_gpio sdcc_cfg_data[] = {
 static int gpio_sdc1_hw_det = 85;
 static void gpio_sdc1_config(void)
 {
-	if (machine_is_msm7627a_qrd1() || machine_is_msm7627a_evb()
-					|| machine_is_msm8625_evb()
-					|| machine_is_msm7627a_qrd3()
-					|| machine_is_msm8625_qrd7())
+	if (machine_is_msm7627a_qrd1())
 		gpio_sdc1_hw_det = 42;
 }
 
@@ -253,11 +250,7 @@ static unsigned int msm7627a_sdcc_slot_status(struct device *dev)
 	} else {
 		status = gpio_direction_input(gpio_sdc1_hw_det);
 		if (!status) {
-			if (machine_is_msm7627a_qrd1() ||
-					machine_is_msm7627a_evb() ||
-					machine_is_msm8625_evb()  ||
-					machine_is_msm7627a_qrd3() ||
-					machine_is_msm8625_qrd7())
+			if (machine_is_msm7627a_qrd1())
 				status = !gpio_get_value(gpio_sdc1_hw_det);
 			else
 				status = gpio_get_value(gpio_sdc1_hw_det);
@@ -369,27 +362,20 @@ void __init msm7627a_init_mmc(void)
 {
 	/* eMMC slot */
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
-
-	/* There is no eMMC on SDC3 for QRD3 based devices */
-	if (!(machine_is_msm7627a_qrd3() || machine_is_msm8625_qrd7())) {
-		if (mmc_regulator_init(3, "emmc", 3000000))
-			return;
-		msm_add_sdcc(3, &sdc3_plat_data);
-	}
+	if (mmc_regulator_init(3, "emmc", 3000000))
+		return;
+	sdc3_plat_data.swfi_latency = msm7627a_power_collapse_latency(
+			MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT);
+	msm_add_sdcc(3, &sdc3_plat_data);
 #endif
 	/* Micro-SD slot */
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
 	gpio_sdc1_config();
 	if (mmc_regulator_init(1, "mmc", 2850000))
 		return;
-#ifdef CONFIG_MMC_MSM_CARD_HW_DETECTION
-	/* 8x25 EVT do not use hw detector */
-	if (!(machine_is_msm8625_evt()))
-		sdc1_plat_data.status_irq = MSM_GPIO_TO_INT(gpio_sdc1_hw_det);
-	if (machine_is_msm8625_evt())
-		sdc1_plat_data.status = NULL;
-#endif
-
+	sdc1_plat_data.status_irq = MSM_GPIO_TO_INT(gpio_sdc1_hw_det);
+	sdc1_plat_data.swfi_latency = msm7627a_power_collapse_latency(
+			MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT);
 	msm_add_sdcc(1, &sdc1_plat_data);
 #endif
 	/* SDIO WLAN slot */
@@ -401,12 +387,9 @@ void __init msm7627a_init_mmc(void)
 	/* Not Used */
 #if (defined(CONFIG_MMC_MSM_SDC4_SUPPORT)\
 		&& !defined(CONFIG_MMC_MSM_SDC3_8_BIT_SUPPORT))
-	/* There is no SDC4 for QRD3/7 based devices */
-	if (!(machine_is_msm7627a_qrd3() || machine_is_msm8625_qrd7())) {
-		if (mmc_regulator_init(4, "smps3", 1800000))
-			return;
-		msm_add_sdcc(4, &sdc4_plat_data);
-	}
+	if (mmc_regulator_init(4, "smps3", 1800000))
+		return;
+	msm_add_sdcc(4, &sdc4_plat_data);
 #endif
 }
 #endif

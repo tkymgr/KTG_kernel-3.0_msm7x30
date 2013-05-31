@@ -1,6 +1,6 @@
 /* amrwb audio decoder device
  *
- * Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2011, The Linux Foundation. All rights reserved.
  *
  * Based on the mp3 native driver in arch/arm/mach-msm/qdsp5v2/audio_mp3.c
  *
@@ -45,6 +45,7 @@
 #include <mach/msm_adsp.h>
 #include <mach/iommu.h>
 #include <mach/iommu_domains.h>
+#include <mach/msm_subsystem_map.h>
 #include <mach/qdsp5v2/qdsp5audppmsg.h>
 #include <mach/qdsp5v2/qdsp5audplaycmdi.h>
 #include <mach/qdsp5v2/qdsp5audplaymsg.h>
@@ -135,8 +136,8 @@ struct audio {
 	char *data;
 	int32_t phys; /* physical address of write buffer */
 
-	void *map_v_read;
-	void *map_v_write;
+	struct msm_mapped_buffer *map_v_read;
+	struct msm_mapped_buffer *map_v_write;
 
 	int mfield; /* meta field embedded in data */
 	int rflush; /* Read  flush */
@@ -194,10 +195,8 @@ static void audamrwb_send_data(struct audio *audio, unsigned needed);
 static void audamrwb_config_hostpcm(struct audio *audio);
 static void audamrwb_buffer_refresh(struct audio *audio);
 static void audamrwb_dsp_event(void *private, unsigned id, uint16_t *msg);
-#ifdef CONFIG_HAS_EARLYSUSPEND
 static void audamrwb_post_event(struct audio *audio, int type,
 		union msm_audio_event_payload payload);
-#endif
 
 /* must be called with audio->lock held */
 static int audamrwb_enable(struct audio *audio)
@@ -1002,10 +1001,12 @@ static long audamrwb_ioctl(struct file *file, unsigned int cmd,
 					rc = -ENOMEM;
 					break;
 			}
-			audio->map_v_read = ioremap(
+			audio->map_v_read = msm_subsystem_map_buffer(
 						audio->read_phys,
 						config.buffer_size *
-						config.buffer_count);
+						config.buffer_count,
+						MSM_SUBSYSTEM_MAP_KADDR,
+						NULL, 0);
 			if (IS_ERR(audio->map_v_read)) {
 				MM_ERR("Error could not map read"
 							" phys address\n");
@@ -1015,7 +1016,7 @@ static long audamrwb_ioctl(struct file *file, unsigned int cmd,
 			} else {
 				uint8_t index;
 				uint32_t offset = 0;
-				audio->read_data = audio->map_v_read;
+				audio->read_data = audio->map_v_read->vaddr;
 				audio->pcm_feedback = 1;
 				audio->buf_refresh = 0;
 				audio->pcm_buf_count =
@@ -1398,10 +1399,10 @@ static int audamrwb_release(struct inode *inode, struct file *file)
 	audio->event_abort = 1;
 	wake_up(&audio->event_wait);
 	audamrwb_reset_event_queue(audio);
-	iounmap(audio->map_v_write);
+	msm_subsystem_unmap_buffer(audio->map_v_write);
 	free_contiguous_memory_by_paddr(audio->phys);
 	if (audio->read_data) {
-		iounmap(audio->map_v_read);
+		msm_subsystem_unmap_buffer(audio->map_v_read);
 		free_contiguous_memory_by_paddr(audio->read_phys);
 	}
 	mutex_unlock(&audio->lock);
@@ -1413,7 +1414,6 @@ static int audamrwb_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
 static void audamrwb_post_event(struct audio *audio, int type,
 		union msm_audio_event_payload payload)
 {
@@ -1442,6 +1442,7 @@ static void audamrwb_post_event(struct audio *audio, int type,
 	wake_up(&audio->event_wait);
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
 static void audamrwb_suspend(struct early_suspend *h)
 {
 	struct audamrwb_suspend_ctl *ctl =
@@ -1588,7 +1589,9 @@ static int audamrwb_open(struct inode *inode, struct file *file)
 		kfree(audio);
 		goto done;
 	} else {
-		audio->map_v_write = ioremap(audio->phys, DMASZ);
+		audio->map_v_write = msm_subsystem_map_buffer(
+					audio->phys, DMASZ,
+					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
 		if (IS_ERR(audio->map_v_write)) {
 			MM_ERR("could not map write phys buffers, freeing \
 					instance 0x%08x\n", (int)audio);
@@ -1598,7 +1601,7 @@ static int audamrwb_open(struct inode *inode, struct file *file)
 			kfree(audio);
 			goto done;
 		}
-		audio->data = audio->map_v_write;
+		audio->data = audio->map_v_write->vaddr;
 		MM_DBG("write buf: phy addr 0x%08x kernel addr 0x%08x\n",
 				audio->phys, (int)audio->data);
 	}
@@ -1687,7 +1690,7 @@ done:
 event_err:
 	msm_adsp_put(audio->audplay);
 err:
-	iounmap(audio->map_v_write);
+	msm_subsystem_unmap_buffer(audio->map_v_write);
 	free_contiguous_memory_by_paddr(audio->phys);
 	audpp_adec_free(audio->dec_id);
 	kfree(audio);

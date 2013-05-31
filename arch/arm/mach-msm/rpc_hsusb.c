@@ -1,6 +1,6 @@
 /* linux/arch/arm/mach-msm/rpc_hsusb.c
  *
- * Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2011, The Linux Foundation. All rights reserved.
  *
  * All source code in this file is licensed under the following license except
  * where indicated.
@@ -384,6 +384,8 @@ EXPORT_SYMBOL(msm_hsusb_is_serial_num_null);
 int msm_chg_usb_charger_connected(uint32_t device)
 {
 	int rc = 0;
+
+#ifdef CONFIG_USE_PMIC_CHARGING_ON_AMSS
 	struct hsusb_start_req {
 		struct rpc_request_hdr hdr;
 		uint32_t otg_dev;
@@ -400,6 +402,7 @@ int msm_chg_usb_charger_connected(uint32_t device)
 			__func__, rc);
 	} else
 		pr_debug("msm_chg_usb_charger_connected\n");
+#endif
 
 	return rc;
 }
@@ -408,6 +411,8 @@ EXPORT_SYMBOL(msm_chg_usb_charger_connected);
 int msm_chg_usb_i_is_available(uint32_t sample)
 {
 	int rc = 0;
+
+#ifdef CONFIG_USE_PMIC_CHARGING_ON_AMSS
 	struct hsusb_start_req {
 		struct rpc_request_hdr hdr;
 		uint32_t i_ma;
@@ -425,6 +430,9 @@ int msm_chg_usb_i_is_available(uint32_t sample)
 	} else
 		pr_debug("msm_chg_usb_i_is_available(%u)\n", sample);
 
+	usleep(3000);
+#endif
+
 	return rc;
 }
 EXPORT_SYMBOL(msm_chg_usb_i_is_available);
@@ -432,6 +440,8 @@ EXPORT_SYMBOL(msm_chg_usb_i_is_available);
 int msm_chg_usb_i_is_not_available(void)
 {
 	int rc = 0;
+
+#ifdef CONFIG_USE_PMIC_CHARGING_ON_AMSS
 	struct hsusb_start_req {
 		struct rpc_request_hdr hdr;
 	} req;
@@ -446,6 +456,7 @@ int msm_chg_usb_i_is_not_available(void)
 			"%d \n", __func__, rc);
 	} else
 		pr_debug("msm_chg_usb_i_is_not_available\n");
+#endif
 
 	return rc;
 }
@@ -454,6 +465,8 @@ EXPORT_SYMBOL(msm_chg_usb_i_is_not_available);
 int msm_chg_usb_charger_disconnected(void)
 {
 	int rc = 0;
+
+#ifdef CONFIG_USE_PMIC_CHARGING_ON_AMSS
 	struct hsusb_start_req {
 		struct rpc_request_hdr hdr;
 	} req;
@@ -468,6 +481,7 @@ int msm_chg_usb_charger_disconnected(void)
 			__func__, rc);
 	} else
 		pr_debug("msm_chg_usb_charger_disconnected\n");
+#endif
 
 	return rc;
 }
@@ -624,7 +638,7 @@ int usb_diag_update_pid_and_serial_num(uint32_t pid, const char *snum)
 }
 
 
-#ifdef CONFIG_USB_MSM_72K
+#ifdef CONFIG_USB_GADGET_MSM_72K
 static enum power_supply_property hsusb_chg_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 };
@@ -694,9 +708,9 @@ static int hsusb_chg_get_property(struct power_supply *bat_ps,
 }
 
 /* charger api wrappers */
-int hsusb_chg_init(int connect)
+int hsusb_chg_init(int init)
 {
-	if (connect) {
+	if (init) {
 		mutex_init(&hsusb_chg_state.lock);
 
 		if (hsusb_chg_supplied_to) {

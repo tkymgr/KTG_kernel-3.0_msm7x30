@@ -30,7 +30,6 @@
 #include <linux/bitops.h>
 #include <linux/debugfs.h>
 #include <linux/platform_device.h>
-#include <linux/ctype.h>
 #include <linux/slab.h>
 #include <sound/ac97_codec.h>
 #include <sound/core.h>
@@ -581,24 +580,11 @@ int soc_pcm_open(struct snd_pcm_substream *substream)
 	}
 
 	if (codec_dai->driver->ops->startup) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			ret = codec_dai->driver->ops->startup(substream,
-								codec_dai);
-			if (ret < 0) {
-				printk(KERN_ERR "asoc: can't open codec %s\n",
-					codec_dai->name);
-				goto codec_dai_err;
-			}
-		} else {
-			if (!codec_dai->capture_active) {
-				ret = codec_dai->driver->ops->startup(substream,
-								codec_dai);
-				if (ret < 0) {
-					printk(KERN_ERR "can't open codec %s\n",
-						codec_dai->name);
-					goto codec_dai_err;
-				}
-			}
+		ret = codec_dai->driver->ops->startup(substream, codec_dai);
+		if (ret < 0) {
+			printk(KERN_ERR "asoc: can't open codec %s\n",
+				codec_dai->name);
+			goto codec_dai_err;
 		}
 	}
 
@@ -796,15 +782,8 @@ int soc_pcm_close(struct snd_pcm_substream *substream)
 	if (cpu_dai->driver->ops->shutdown)
 		cpu_dai->driver->ops->shutdown(substream, cpu_dai);
 
-	if (codec_dai->driver->ops->shutdown) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			codec_dai->driver->ops->shutdown(substream, codec_dai);
-		} else {
-			if (!codec_dai->capture_active)
-				codec_dai->driver->ops->shutdown(substream,
-								codec_dai);
-		}
-	}
+	if (codec_dai->driver->ops->shutdown)
+		codec_dai->driver->ops->shutdown(substream, codec_dai);
 
 	if (rtd->dai_link->ops && rtd->dai_link->ops->shutdown)
 		rtd->dai_link->ops->shutdown(substream);
@@ -826,8 +805,7 @@ int soc_pcm_close(struct snd_pcm_substream *substream)
 		}
 	} else {
 		/* capture streams can be powered down now */
-		if (!codec_dai->capture_active)
-			snd_soc_dapm_stream_event(rtd,
+		snd_soc_dapm_stream_event(rtd,
 			codec_dai->driver->capture.stream_name,
 			SND_SOC_DAPM_STREAM_STOP);
 	}
@@ -894,12 +872,10 @@ int soc_pcm_prepare(struct snd_pcm_substream *substream)
 		snd_soc_dapm_stream_event(rtd,
 					  codec_dai->driver->playback.stream_name,
 					  SND_SOC_DAPM_STREAM_START);
-	else {
-		if (codec_dai->capture_active == 1)
-			snd_soc_dapm_stream_event(rtd,
-				  codec_dai->driver->capture.stream_name,
-				  SND_SOC_DAPM_STREAM_START);
-	}
+	else
+		snd_soc_dapm_stream_event(rtd,
+					  codec_dai->driver->capture.stream_name,
+					  SND_SOC_DAPM_STREAM_START);
 
 	snd_soc_dai_digital_mute(codec_dai, 0);
 
@@ -933,24 +909,11 @@ int soc_pcm_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	if (codec_dai->driver->ops->hw_params) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			ret = codec_dai->driver->ops->hw_params(substream,
-							params, codec_dai);
-			if (ret < 0) {
-				printk(KERN_ERR "not set codec %s hw params\n",
-					codec_dai->name);
-				goto codec_err;
-			}
-		} else {
-			if (codec_dai->capture_active == 1) {
-				ret = codec_dai->driver->ops->hw_params(
-						substream, params, codec_dai);
-				if (ret < 0) {
-					printk(KERN_ERR "fail: %s hw params\n",
-						codec_dai->name);
-					goto codec_err;
-				}
-			}
+		ret = codec_dai->driver->ops->hw_params(substream, params, codec_dai);
+		if (ret < 0) {
+			printk(KERN_ERR "asoc: can't set codec %s hw params\n",
+				codec_dai->name);
+			goto codec_err;
 		}
 	}
 
@@ -1054,19 +1017,9 @@ int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	int ret;
 
 	if (codec_dai->driver->ops->trigger) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			ret = codec_dai->driver->ops->trigger(substream,
-						cmd, codec_dai);
-			if (ret < 0)
-				return ret;
-		} else {
-			if (codec_dai->capture_active == 1) {
-				ret = codec_dai->driver->ops->trigger(
-						substream, cmd, codec_dai);
-				if (ret < 0)
-					return ret;
-			}
-		}
+		ret = codec_dai->driver->ops->trigger(substream, cmd, codec_dai);
+		if (ret < 0)
+			return ret;
 	}
 
 	if (platform->driver->ops && platform->driver->ops->trigger) {
@@ -2188,20 +2141,9 @@ static void snd_soc_instantiate_card(struct snd_soc_card *card)
 		 "%s", card->name);
 	snprintf(card->snd_card->longname, sizeof(card->snd_card->longname),
 		 "%s", card->long_name ? card->long_name : card->name);
-	snprintf(card->snd_card->driver, sizeof(card->snd_card->driver),
-		 "%s", card->driver_name ? card->driver_name : card->name);
-	for (i = 0; i < ARRAY_SIZE(card->snd_card->driver); i++) {
-		switch (card->snd_card->driver[i]) {
-		case '_':
-		case '-':
-		case '\0':
-			break;
-		default:
-			if (!isalnum(card->snd_card->driver[i]))
-				card->snd_card->driver[i] = '_';
-			break;
-		}
-	}
+	if (card->driver_name)
+		strlcpy(card->snd_card->driver, card->driver_name,
+			sizeof(card->snd_card->driver));
 
 	if (card->late_probe) {
 		ret = card->late_probe(card);
@@ -3740,29 +3682,6 @@ int snd_soc_dai_set_channel_map(struct snd_soc_dai *dai,
 }
 EXPORT_SYMBOL_GPL(snd_soc_dai_set_channel_map);
 
-/**
- * snd_soc_dai_get_channel_map - configure DAI audio channel map
- * @dai: DAI
- * @tx_num: how many TX channels
- * @tx_slot: pointer to an array which imply the TX slot number channel
- *           0~num-1 uses
- * @rx_num: how many RX channels
- * @rx_slot: pointer to an array which imply the RX slot number channel
- *           0~num-1 uses
- *
- * configure the relationship between channel number and TDM slot number.
- */
-int snd_soc_dai_get_channel_map(struct snd_soc_dai *dai,
-	unsigned int *tx_num, unsigned int *tx_slot,
-	unsigned int *rx_num, unsigned int *rx_slot)
-{
-	if (dai->driver && dai->driver->ops->get_channel_map)
-		return dai->driver->ops->get_channel_map(dai, tx_num, tx_slot,
-			rx_num, rx_slot);
-	else
-		return -EINVAL;
-}
-EXPORT_SYMBOL_GPL(snd_soc_dai_get_channel_map);
 /**
  * snd_soc_dai_set_tristate - configure DAI system or master clock.
  * @dai: DAI

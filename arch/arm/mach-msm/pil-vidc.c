@@ -15,16 +15,14 @@
 #include <linux/platform_device.h>
 #include <linux/elf.h>
 #include <linux/err.h>
-#include <linux/clk.h>
 
 #include "peripheral-loader.h"
 #include "scm-pas.h"
 
-struct vidc_data {
-	struct clk *smmu_iface;
-	struct clk *core;
-	struct pil_device *pil;
-};
+static int nop_verify_blob(struct pil_desc *pil, u32 phy_addr, size_t size)
+{
+	return 0;
+}
 
 static int pil_vidc_init_image(struct pil_desc *pil, const u8 *metadata,
 		size_t size)
@@ -34,22 +32,7 @@ static int pil_vidc_init_image(struct pil_desc *pil, const u8 *metadata,
 
 static int pil_vidc_reset(struct pil_desc *pil)
 {
-	int ret;
-	struct vidc_data *drv = dev_get_drvdata(pil->dev);
-
-	ret = clk_prepare_enable(drv->smmu_iface);
-	if (ret)
-		goto err_smmu;
-	ret = clk_prepare_enable(drv->core);
-	if (ret)
-		goto err_core;
-	ret = pas_auth_and_reset(PAS_VIDC);
-
-	clk_disable_unprepare(drv->core);
-err_core:
-	clk_disable_unprepare(drv->smmu_iface);
-err_smmu:
-	return ret;
+	return pas_auth_and_reset(PAS_VIDC);
 }
 
 static int pil_vidc_shutdown(struct pil_desc *pil)
@@ -59,6 +42,7 @@ static int pil_vidc_shutdown(struct pil_desc *pil)
 
 static struct pil_reset_ops pil_vidc_ops = {
 	.init_image = pil_vidc_init_image,
+	.verify_blob = nop_verify_blob,
 	.auth_and_reset = pil_vidc_reset,
 	.shutdown = pil_vidc_shutdown,
 };
@@ -66,8 +50,6 @@ static struct pil_reset_ops pil_vidc_ops = {
 static int __devinit pil_vidc_driver_probe(struct platform_device *pdev)
 {
 	struct pil_desc *desc;
-	struct vidc_data *drv;
-	int ret;
 
 	if (pas_supported(PAS_VIDC) < 0)
 		return -ENOSYS;
@@ -76,48 +58,16 @@ static int __devinit pil_vidc_driver_probe(struct platform_device *pdev)
 	if (!desc)
 		return -ENOMEM;
 
-	drv = devm_kzalloc(&pdev->dev, sizeof(*drv), GFP_KERNEL);
-	if (!drv)
-		return -ENOMEM;
-	platform_set_drvdata(pdev, drv);
-	drv->smmu_iface = clk_get(&pdev->dev, "smmu_iface_clk");
-	if (IS_ERR(drv->smmu_iface)) {
-		dev_err(&pdev->dev, "failed to get smmu interface clock\n");
-		ret = PTR_ERR(drv->smmu_iface);
-		goto err_smmu;
-	}
-	drv->core = clk_get(&pdev->dev, "core_clk");
-	if (IS_ERR(drv->core)) {
-		dev_err(&pdev->dev, "failed to get core clock\n");
-		ret = PTR_ERR(drv->core);
-		goto err_core;
-	}
-
 	desc->name = "vidc";
 	desc->dev = &pdev->dev;
 	desc->ops = &pil_vidc_ops;
-	desc->owner = THIS_MODULE;
-	drv->pil = msm_pil_register(desc);
-	if (IS_ERR(drv->pil)) {
-		ret = PTR_ERR(drv->pil);
-		goto err_register;
-	}
+	if (msm_pil_register(desc))
+		return -EINVAL;
 	return 0;
-
-err_register:
-	clk_put(drv->core);
-err_core:
-	clk_put(drv->smmu_iface);
-err_smmu:
-	return ret;
 }
 
 static int __devexit pil_vidc_driver_exit(struct platform_device *pdev)
 {
-	struct vidc_data *drv = platform_get_drvdata(pdev);
-	msm_pil_unregister(drv->pil);
-	clk_put(drv->smmu_iface);
-	clk_put(drv->core);
 	return 0;
 }
 

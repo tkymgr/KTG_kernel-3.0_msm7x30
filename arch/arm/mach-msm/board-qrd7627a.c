@@ -26,16 +26,10 @@
 #include <linux/power_supply.h>
 #include <linux/input/rmi_platformdata.h>
 #include <linux/input/rmi_i2c.h>
-#include <linux/i2c/atmel_mxt_ts.h>
 #include <linux/regulator/consumer.h>
-#include <linux/memblock.h>
-#include <linux/input/ft5x06_ts.h>
-#include <linux/msm_adc.h>
-#include <linux/regulator/gpio-regulator.h>
 #include <asm/mach/mmc.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include <asm/hardware/gic.h>
 #include <mach/board.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_hsusb.h>
@@ -61,7 +55,7 @@
 #include "board-msm7627a.h"
 
 #define PMEM_KERNEL_EBI1_SIZE	0x3A000
-#define MSM_PMEM_AUDIO_SIZE	0x1F4000
+#define MSM_PMEM_AUDIO_SIZE	0x5B000
 #define BAHAMA_SLAVE_ID_FM_REG 0x02
 #define FM_GPIO	83
 #define BT_PCM_BCLK_MODE  0x88
@@ -129,8 +123,145 @@ static struct msm_i2c_platform_data msm_gsbi1_qup_i2c_pdata = {
 
 #ifdef CONFIG_ARCH_MSM7X27A
 #define MSM_PMEM_MDP_SIZE       0x2300000
-#define MSM_PMEM_ADSP_SIZE      0x1200000
+#define MSM_PMEM_ADSP_SIZE      0x1100000
+
+#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
+#define MSM_FB_SIZE		0x260000
+#else
+#define MSM_FB_SIZE		0x195000
 #endif
+
+#endif
+
+#if defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C) || \
+defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C_MODULE)
+
+#ifndef CLEARPAD3000_ATTEN_GPIO
+#define CLEARPAD3000_ATTEN_GPIO (48)
+#endif
+
+#ifndef CLEARPAD3000_RESET_GPIO
+#define CLEARPAD3000_RESET_GPIO (26)
+#endif
+
+static int synaptics_touchpad_setup(void);
+
+static struct msm_gpio clearpad3000_cfg_data[] = {
+	{GPIO_CFG(CLEARPAD3000_ATTEN_GPIO, 0, GPIO_CFG_INPUT,
+			GPIO_CFG_NO_PULL, GPIO_CFG_6MA), "rmi4_attn"},
+	{GPIO_CFG(CLEARPAD3000_RESET_GPIO, 0, GPIO_CFG_OUTPUT,
+			GPIO_CFG_PULL_DOWN, GPIO_CFG_8MA), "rmi4_reset"},
+};
+
+static struct rmi_XY_pair rmi_offset = {.x = 0, .y = 0};
+static struct rmi_range rmi_clipx = {.min = 48, .max = 980};
+static struct rmi_range rmi_clipy = {.min = 7, .max = 1647};
+static struct rmi_f11_functiondata synaptics_f11_data = {
+	.swap_axes = false,
+	.flipX = false,
+	.flipY = false,
+	.offset = &rmi_offset,
+	.button_height = 113,
+	.clipX = &rmi_clipx,
+	.clipY = &rmi_clipy,
+};
+
+#define MAX_LEN		100
+
+static ssize_t clearpad3000_virtual_keys_register(struct kobject *kobj,
+		     struct kobj_attribute *attr, char *buf)
+{
+	char *virtual_keys = __stringify(EV_KEY) ":" __stringify(KEY_MENU) \
+			     ":60:830:120:60" ":" __stringify(EV_KEY) \
+			     ":" __stringify(KEY_HOME)   ":180:830:120:60" \
+				":" __stringify(EV_KEY) ":" \
+				__stringify(KEY_SEARCH) ":300:830:120:60" \
+				":" __stringify(EV_KEY) ":" \
+			__stringify(KEY_BACK)   ":420:830:120:60" "\n";
+
+	return snprintf(buf, strnlen(virtual_keys, MAX_LEN) + 1 , "%s",
+			virtual_keys);
+}
+
+static struct kobj_attribute clearpad3000_virtual_keys_attr = {
+	.attr = {
+		.name = "virtualkeys.sensor00fn11",
+		.mode = S_IRUGO,
+	},
+	.show = &clearpad3000_virtual_keys_register,
+};
+
+static struct attribute *virtual_key_properties_attrs[] = {
+	&clearpad3000_virtual_keys_attr.attr,
+	NULL
+};
+
+static struct attribute_group virtual_key_properties_attr_group = {
+	.attrs = virtual_key_properties_attrs,
+};
+
+struct kobject *virtual_key_properties_kobj;
+
+static struct rmi_functiondata synaptics_functiondata[] = {
+	{
+		.function_index = RMI_F11_INDEX,
+		.data = &synaptics_f11_data,
+	},
+};
+
+static struct rmi_functiondata_list synaptics_perfunctiondata = {
+	.count = ARRAY_SIZE(synaptics_functiondata),
+	.functiondata = synaptics_functiondata,
+};
+
+static struct rmi_sensordata synaptics_sensordata = {
+	.perfunctiondata = &synaptics_perfunctiondata,
+	.rmi_sensor_setup	= synaptics_touchpad_setup,
+};
+
+static struct rmi_i2c_platformdata synaptics_platformdata = {
+	.i2c_address = 0x2c,
+	.irq_type = IORESOURCE_IRQ_LOWLEVEL,
+	.sensordata = &synaptics_sensordata,
+};
+
+static struct i2c_board_info synaptic_i2c_clearpad3k[] = {
+	{
+	I2C_BOARD_INFO("rmi4_ts", 0x2c),
+	.platform_data = &synaptics_platformdata,
+	},
+};
+
+static int synaptics_touchpad_setup(void)
+{
+	int retval = 0;
+
+	virtual_key_properties_kobj =
+		kobject_create_and_add("board_properties", NULL);
+	if (virtual_key_properties_kobj)
+		retval = sysfs_create_group(virtual_key_properties_kobj,
+				&virtual_key_properties_attr_group);
+	if (!virtual_key_properties_kobj || retval)
+		pr_err("failed to create ft5202 board_properties\n");
+
+	retval = msm_gpios_request_enable(clearpad3000_cfg_data,
+		    sizeof(clearpad3000_cfg_data)/sizeof(struct msm_gpio));
+	if (retval) {
+		pr_err("%s:Failed to obtain touchpad GPIO %d. Code: %d.",
+				__func__, CLEARPAD3000_ATTEN_GPIO, retval);
+		retval = 0; /* ignore the err */
+	}
+	synaptics_platformdata.irq = gpio_to_irq(CLEARPAD3000_ATTEN_GPIO);
+
+	gpio_set_value(CLEARPAD3000_RESET_GPIO, 0);
+	usleep(10000);
+	gpio_set_value(CLEARPAD3000_RESET_GPIO, 1);
+	usleep(50000);
+
+	return retval;
+}
+#endif
+
 
 static struct android_usb_platform_data android_usb_pdata = {
 	.update_pid_and_serial_num = usb_diag_update_pid_and_serial_num,
@@ -312,72 +443,6 @@ static struct msm_pm_boot_platform_data msm_pm_boot_pdata __initdata = {
 	.p_addr = 0,
 };
 
-/* 8625 PM platform data */
-static struct msm_pm_platform_data msm8625_pm_data[MSM_PM_SLEEP_MODE_NR * 2] = {
-	/* CORE0 entries */
-	[MSM_PM_MODE(0, MSM_PM_SLEEP_MODE_POWER_COLLAPSE)] = {
-					.idle_supported = 1,
-					.suspend_supported = 1,
-					.idle_enabled = 0,
-					.suspend_enabled = 0,
-					.latency = 16000,
-					.residency = 20000,
-	},
-
-	[MSM_PM_MODE(0, MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN)] = {
-					.idle_supported = 1,
-					.suspend_supported = 1,
-					.idle_enabled = 0,
-					.suspend_enabled = 0,
-					.latency = 12000,
-					.residency = 20000,
-	},
-
-	/* picked latency & redisdency values from 7x30 */
-	[MSM_PM_MODE(0, MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE)] = {
-					.idle_supported = 1,
-					.suspend_supported = 1,
-					.idle_enabled = 0,
-					.suspend_enabled = 0,
-					.latency = 500,
-					.residency = 6000,
-	},
-
-	[MSM_PM_MODE(0, MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT)] = {
-					.idle_supported = 1,
-					.suspend_supported = 1,
-					.idle_enabled = 1,
-					.suspend_enabled = 1,
-					.latency = 2,
-					.residency = 10,
-	},
-
-	/* picked latency & redisdency values from 7x30 */
-	[MSM_PM_MODE(1, MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE)] = {
-					.idle_supported = 1,
-					.suspend_supported = 1,
-					.idle_enabled = 0,
-					.suspend_enabled = 0,
-					.latency = 500,
-					.residency = 6000,
-	},
-
-	[MSM_PM_MODE(1, MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT)] = {
-					.idle_supported = 1,
-					.suspend_supported = 1,
-					.idle_enabled = 1,
-					.suspend_enabled = 1,
-					.latency = 2,
-					.residency = 10,
-	},
-
-};
-
-static struct msm_pm_boot_platform_data msm_pm_8625_boot_pdata __initdata = {
-	.mode = MSM_PM_BOOT_CONFIG_REMAP_BOOT_ADDR,
-	.v_addr = MSM_CFG_CTL_BASE,
-};
-
 static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 	.name = "pmem_adsp",
 	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
@@ -408,6 +473,66 @@ static int __init pmem_adsp_size_setup(char *p)
 }
 
 early_param("pmem_adsp_size", pmem_adsp_size_setup);
+
+static unsigned fb_size = MSM_FB_SIZE;
+static int __init fb_size_setup(char *p)
+{
+	fb_size = memparse(p, NULL);
+	return 0;
+}
+
+early_param("fb_size", fb_size_setup);
+
+static struct resource msm_fb_resources[] = {
+	{
+		.flags	= IORESOURCE_DMA,
+	}
+};
+
+static int msm_fb_detect_panel(const char *name)
+{
+	int ret;
+
+	if (!strncmp(name, "mipi_video_truly_wvga", 21))
+		ret = 0;
+	else
+		ret = -ENODEV;
+
+	return ret;
+}
+
+static int mipi_truly_set_bl(int on)
+{
+	gpio_set_value_cansleep(QRD_GPIO_BACKLIGHT_EN, !!on);
+
+	return 1;
+}
+
+static struct msm_fb_platform_data msm_fb_pdata = {
+	.detect_client = msm_fb_detect_panel,
+};
+
+static struct platform_device msm_fb_device = {
+	.name   = "msm_fb",
+	.id     = 0,
+	.num_resources  = ARRAY_SIZE(msm_fb_resources),
+	.resource       = msm_fb_resources,
+	.dev    = {
+		.platform_data = &msm_fb_pdata,
+	}
+};
+
+static struct msm_panel_common_pdata mipi_truly_pdata = {
+	.pmic_backlight = mipi_truly_set_bl,
+};
+
+static struct platform_device mipi_dsi_truly_panel_device = {
+	.name	= "mipi_truly",
+	.id	= 0,
+	.dev	= {
+		.platform_data = &mipi_truly_pdata,
+	}
+};
 
 #define SND(desc, num) { .name = #desc, .id = num }
 static struct snd_endpoint snd_endpoints_list[] = {
@@ -511,8 +636,7 @@ static unsigned int dec_concurrency_table[] = {
 	(DEC4_FORMAT),
 
 	/* Concurrency 6 */
-	(DEC0_FORMAT|(1<<MSM_ADSP_MODE_TUNNEL)|
-			(1<<MSM_ADSP_MODE_NONTUNNEL)|(1<<MSM_ADSP_OP_DM)),
+	(DEC0_FORMAT|(1<<MSM_ADSP_MODE_NONTUNNEL)|(1<<MSM_ADSP_OP_DM)),
 	0, 0, 0, 0,
 
 	/* Concurrency 7 */
@@ -579,9 +703,9 @@ static struct platform_device android_pmem_device = {
 static u32 msm_calculate_batt_capacity(u32 current_voltage);
 
 static struct msm_psy_batt_pdata msm_psy_batt_data = {
-	.voltage_min_design     = 3500,
+	.voltage_min_design     = 3200,
 	.voltage_max_design     = 4200,
-	.voltage_fail_safe      = 3598,
+	.voltage_fail_safe      = 3340,
 	.avail_chg_sources      = AC_CHG | USB_CHG ,
 	.batt_technology        = POWER_SUPPLY_TECHNOLOGY_LION,
 	.calculate_capacity     = &msm_calculate_batt_capacity,
@@ -607,154 +731,7 @@ static struct platform_device msm_batt_device = {
 	.dev.platform_data  = &msm_psy_batt_data,
 };
 
-static char *msm_adc_surf_device_names[] = {
-	"XO_ADC",
-};
-
-static struct msm_adc_platform_data msm_adc_pdata = {
-	.dev_names = msm_adc_surf_device_names,
-	.num_adc = ARRAY_SIZE(msm_adc_surf_device_names),
-	.target_hw = MSM_8x25,
-};
-
-static struct platform_device msm_adc_device = {
-	.name   = "msm_adc",
-	.id = -1,
-	.dev = {
-		.platform_data = &msm_adc_pdata,
-	},
-};
-
-#define GPIO_VREG_INIT(_id, _reg_name, _gpio_label, _gpio, _active_low) \
-	[GPIO_VREG_ID_##_id] = { \
-		.init_data = { \
-			.constraints = { \
-				.valid_ops_mask	= REGULATOR_CHANGE_STATUS, \
-			}, \
-			.num_consumer_supplies	= \
-					ARRAY_SIZE(vreg_consumers_##_id), \
-			.consumer_supplies	= vreg_consumers_##_id, \
-		}, \
-		.regulator_name	= _reg_name, \
-		.active_low	= _active_low, \
-		.gpio_label	= _gpio_label, \
-		.gpio		= _gpio, \
-	}
-
-#define GPIO_VREG_ID_EXT_2P85V	0
-#define GPIO_VREG_ID_EXT_1P8V	1
-#define GPIO_VREG_ID_EXT_2P85V_SKU3	2
-#define GPIO_VREG_ID_EXT_1P8V_SKU3	3
-#define GPIO_VREG_ID_EXT_1P8V_SKU3_1	4
-
-static struct regulator_consumer_supply vreg_consumers_EXT_2P85V[] = {
-	REGULATOR_SUPPLY("cam_ov5647_avdd", "0-006c"),
-	REGULATOR_SUPPLY("cam_ov7692_avdd", "0-0078"),
-	REGULATOR_SUPPLY("cam_ov8825_avdd", "0-000d"),
-	REGULATOR_SUPPLY("lcd_vdd", "mipi_dsi.1"),
-};
-
-static struct regulator_consumer_supply vreg_consumers_EXT_1P8V[] = {
-	REGULATOR_SUPPLY("cam_ov5647_vdd", "0-006c"),
-	REGULATOR_SUPPLY("cam_ov7692_vdd", "0-0078"),
-	REGULATOR_SUPPLY("cam_ov8825_vdd", "0-000d"),
-	REGULATOR_SUPPLY("lcd_vddi", "mipi_dsi.1"),
-};
-
-static struct regulator_consumer_supply vreg_consumers_EXT_2P85V_SKU3[] = {
-	REGULATOR_SUPPLY("cam_ov5647_avdd", "0-006c"),
-	REGULATOR_SUPPLY("cam_ov7692_avdd", "0-0078"),
-	REGULATOR_SUPPLY("cam_ov8825_avdd", "0-000d"),
-	REGULATOR_SUPPLY("lcd_vdd_sku3", "lcdc.0"),
-};
-
-static struct regulator_consumer_supply vreg_consumers_EXT_1P8V_SKU3[] = {
-	REGULATOR_SUPPLY("cam_ov5647_vdd", "0-006c"),
-	REGULATOR_SUPPLY("cam_ov7692_vdd", "0-0078"),
-	REGULATOR_SUPPLY("cam_ov8825_vdd", "0-000d"),
-	REGULATOR_SUPPLY("lcd_vddi_sku3", "lcdc.0"),
-};
-
-static struct regulator_consumer_supply vreg_consumers_EXT_1P8V_SKU3_1[] = {
-	REGULATOR_SUPPLY("cam_ov5647_vdd", "0-006c"),
-	REGULATOR_SUPPLY("cam_ov7692_vdd", "0-0078"),
-	REGULATOR_SUPPLY("cam_ov8825_vdd", "0-000d"),
-	REGULATOR_SUPPLY("lcd_vddi_sku3", "lcdc.0"),
-};
-
-/* GPIO regulator constraints */
-static struct gpio_regulator_platform_data msm_gpio_regulator_pdata[] = {
-	GPIO_VREG_INIT(EXT_2P85V, "ext_2p85v", "ext_2p85v_en", 35, 0),
-	GPIO_VREG_INIT(EXT_1P8V, "ext_1p8v", "ext_1p8v_en", 40, 0),
-	GPIO_VREG_INIT(EXT_2P85V_SKU3, "ext_2p85v_sku3", "ext_2p85v_sku3_en",
-								35, 0),
-	GPIO_VREG_INIT(EXT_1P8V_SKU3, "ext_1p8v_sku3", "ext_1p8v_sku3_en",
-								34, 0),
-	GPIO_VREG_INIT(EXT_1P8V_SKU3_1, "ext_1p8v_sku3_1", "ext_1p8v_sku3_1_en",
-								58, 0),
-};
-
-/* GPIO regulator */
-static struct platform_device qrd_vreg_gpio_ext_2p85v __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= 35,
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_2P85V],
-	},
-};
-
-static struct platform_device qrd_vreg_gpio_ext_1p8v __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= 40,
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_1P8V],
-	},
-};
-
-static struct platform_device qrd_vreg_gpio_ext_2p85v_sku3 __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= 35,
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_2P85V_SKU3],
-	},
-};
-
-static struct platform_device qrd_vreg_gpio_ext_1p8v_sku3 __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= 34,
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_1P8V_SKU3],
-	},
-};
-
-static struct platform_device qrd_vreg_gpio_ext_1p8v_sku3_1 __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= 58,
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_1P8V_SKU3_1],
-	},
-};
-
-static struct platform_device *common_devices[] __initdata = {
-	&android_usb_device,
-	&android_pmem_device,
-	&android_pmem_adsp_device,
-	&android_pmem_audio_device,
-	&msm_batt_device,
-	&msm_device_adspdec,
-	&msm_device_snd,
-	&asoc_msm_pcm,
-	&asoc_msm_dai0,
-	&asoc_msm_dai1,
-	&msm_adc_device,
-};
-
-static struct platform_device *qrd7627a_devices[] __initdata = {
+static struct platform_device *qrd1_devices[] __initdata = {
 	&msm_device_dmov,
 	&msm_device_smd,
 	&msm_device_uart1,
@@ -763,38 +740,23 @@ static struct platform_device *qrd7627a_devices[] __initdata = {
 	&msm_gsbi1_qup_i2c_device,
 	&msm_device_otg,
 	&msm_device_gadget_peripheral,
+	&android_usb_device,
+	&android_pmem_device,
+	&android_pmem_adsp_device,
+	&msm_fb_device,
+	&android_pmem_audio_device,
+	&msm_device_snd,
+	&msm_device_adspdec,
+	&msm_batt_device,
 	&msm_kgsl_3d0,
-};
-
-static struct platform_device *msm8625_lcd_camera_devices[] __initdata = {
-	&qrd_vreg_gpio_ext_2p85v,
-	&qrd_vreg_gpio_ext_1p8v,
-};
-
-static struct platform_device *sku3_lcd_camera_devices[] __initdata = {
-	&qrd_vreg_gpio_ext_2p85v_sku3,
-	&qrd_vreg_gpio_ext_1p8v_sku3,
-};
-
-static struct platform_device *sku3_1_lcd_camera_devices[] __initdata = {
-	&qrd_vreg_gpio_ext_2p85v_sku3,
-	&qrd_vreg_gpio_ext_1p8v_sku3_1,
-};
-
-static struct platform_device *qrd3_devices[] __initdata = {
-	&msm_device_nand,
-};
-
-static struct platform_device *msm8625_evb_devices[] __initdata = {
-	&msm8625_device_dmov,
-	&msm8625_device_smd,
-	&msm8625_gsbi0_qup_i2c_device,
-	&msm8625_gsbi1_qup_i2c_device,
-	&msm8625_device_uart1,
-	&msm8625_device_uart_dm1,
-	&msm8625_device_otg,
-	&msm8625_device_gadget_peripheral,
-	&msm8625_kgsl_3d0,
+#ifdef CONFIG_BT
+	&msm_bt_power_device,
+#endif
+	&mipi_dsi_truly_panel_device,
+	&msm_wlan_ar6000_pm_device,
+	&asoc_msm_pcm,
+	&asoc_msm_dai0,
+	&asoc_msm_dai1,
 };
 
 static unsigned pmem_kernel_ebi1_size = PMEM_KERNEL_EBI1_SIZE;
@@ -813,6 +775,19 @@ static int __init pmem_audio_size_setup(char *p)
 }
 early_param("pmem_audio_size", pmem_audio_size_setup);
 
+static void __init msm_msm7627a_allocate_memory_regions(void)
+{
+	void *addr;
+	unsigned long size;
+
+	size = fb_size ? : MSM_FB_SIZE;
+	addr = alloc_bootmem_align(size, 0x1000);
+	msm_fb_resources[0].start = __pa(addr);
+	msm_fb_resources[0].end = msm_fb_resources[0].start + size - 1;
+	pr_info("allocating %lu bytes at %p (%lx physical) for fb\n", size,
+						addr, __pa(addr));
+}
+
 static struct memtype_reserve msm7627a_reserve_table[] __initdata = {
 	[MEMTYPE_SMI] = {
 	},
@@ -824,13 +799,166 @@ static struct memtype_reserve msm7627a_reserve_table[] __initdata = {
 	},
 };
 
-#ifdef CONFIG_ANDROID_PMEM
-static struct android_pmem_platform_data *pmem_pdata_array[] __initdata = {
-		&android_pmem_adsp_pdata,
-		&android_pmem_audio_pdata,
-		&android_pmem_pdata,
+static struct msm_panel_common_pdata mdp_pdata = {
+	.gpio = 97,
+	.mdp_rev = MDP_REV_303,
+};
+
+#define GPIO_LCDC_BRDG_PD      128
+#define GPIO_LCDC_BRDG_RESET_N 129
+#define GPIO_LCD_DSI_SEL 125
+
+static unsigned mipi_dsi_gpio[] = {
+		GPIO_CFG(GPIO_LCDC_BRDG_RESET_N, 0, GPIO_CFG_OUTPUT,
+		GPIO_CFG_NO_PULL, GPIO_CFG_2MA), /* LCDC_BRDG_RESET_N */
+		GPIO_CFG(GPIO_LCDC_BRDG_PD, 0, GPIO_CFG_OUTPUT,
+		GPIO_CFG_NO_PULL, GPIO_CFG_2MA), /* LCDC_BRDG_PD */
+};
+
+static unsigned lcd_dsi_sel_gpio[] = {
+	GPIO_CFG(GPIO_LCD_DSI_SEL, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP,
+			GPIO_CFG_2MA),
+};
+
+enum {
+	DSI_SINGLE_LANE = 1,
+	DSI_TWO_LANES,
+};
+
+static int msm_fb_get_lane_config(void)
+{
+	pr_info("DSI_TWO_LANES\n");
+	return DSI_TWO_LANES;
+}
+
+static int mipi_truly_sel_mode(int video_mode)
+{
+	int rc = 0;
+
+	rc = gpio_request(GPIO_LCD_DSI_SEL, "lcd_dsi_sel");
+	if (rc < 0)
+		goto gpio_error;
+
+	rc = gpio_tlmm_config(lcd_dsi_sel_gpio[0], GPIO_CFG_ENABLE);
+	if (rc)
+		goto gpio_error;
+
+	rc = gpio_direction_output(GPIO_LCD_DSI_SEL, 1);
+	if (!rc) {
+		gpio_set_value_cansleep(GPIO_LCD_DSI_SEL, video_mode);
+		return rc;
+	} else {
+		goto gpio_error;
+	}
+
+gpio_error:
+	pr_err("mipi_truly_sel_mode failed\n");
+	gpio_free(GPIO_LCD_DSI_SEL);
+	return rc;
+}
+
+static int msm_fb_dsi_client_qrd1_reset(void)
+{
+	int rc = 0;
+
+	rc = gpio_request(GPIO_LCDC_BRDG_RESET_N, "lcdc_brdg_reset_n");
+	if (rc < 0) {
+		pr_err("failed to request lcd brdg reset_n\n");
+		return rc;
+	}
+
+	rc = gpio_tlmm_config(mipi_dsi_gpio[0], GPIO_CFG_ENABLE);
+	if (rc < 0) {
+		pr_err("Failed to enable LCDC Bridge reset enable\n");
+		return rc;
+	}
+
+	rc = gpio_direction_output(GPIO_LCDC_BRDG_RESET_N, 1);
+	if (rc < 0) {
+		pr_err("Failed GPIO bridge pd\n");
+		gpio_free(GPIO_LCDC_BRDG_RESET_N);
+		return rc;
+	}
+
+	mipi_truly_sel_mode(1);
+
+	return rc;
+}
+
+static int msm_fb_dsi_client_reset(void)
+{
+	int rc = 0;
+
+	rc = msm_fb_dsi_client_qrd1_reset();
+	return rc;
+}
+
+static int dsi_gpio_initialized;
+
+static int mipi_dsi_panel_qrd1_power(int on)
+{
+	int rc = 0;
+
+	if (!dsi_gpio_initialized) {
+		rc = gpio_request(QRD_GPIO_BACKLIGHT_EN, "gpio_bkl_en");
+		if (rc < 0)
+			return rc;
+
+		rc = gpio_tlmm_config(GPIO_CFG(QRD_GPIO_BACKLIGHT_EN, 0,
+			GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+			GPIO_CFG_ENABLE);
+		if (rc < 0) {
+			pr_err("failed GPIO_BACKLIGHT_EN tlmm config\n");
+			return rc;
+		}
+
+		rc = gpio_direction_output(QRD_GPIO_BACKLIGHT_EN, 1);
+		if (rc < 0) {
+			pr_err("failed to enable backlight\n");
+			gpio_free(QRD_GPIO_BACKLIGHT_EN);
+			return rc;
+		}
+		dsi_gpio_initialized = 1;
+	}
+
+	gpio_set_value_cansleep(QRD_GPIO_BACKLIGHT_EN, !!on);
+
+	if (!on) {
+		gpio_set_value_cansleep(GPIO_LCDC_BRDG_RESET_N, 1);
+		msleep(20);
+		gpio_set_value_cansleep(GPIO_LCDC_BRDG_RESET_N, 0);
+		msleep(20);
+		gpio_set_value_cansleep(GPIO_LCDC_BRDG_RESET_N, 1);
+
+	}
+
+	return rc;
+}
+
+static int mipi_dsi_panel_power(int on)
+{
+	int rc = 0;
+
+	rc = mipi_dsi_panel_qrd1_power(on);
+	return rc;
+}
+
+#define MDP_303_VSYNC_GPIO 97
+
+#ifdef CONFIG_FB_MSM_MDP303
+static struct mipi_dsi_platform_data mipi_dsi_pdata = {
+	.vsync_gpio		= MDP_303_VSYNC_GPIO,
+	.dsi_power_save		= mipi_dsi_panel_power,
+	.dsi_client_reset	= msm_fb_dsi_client_reset,
+	.get_lane_config	= msm_fb_get_lane_config,
 };
 #endif
+
+static void __init msm_fb_add_devices(void)
+{
+	msm_fb_register_device("mdp", &mdp_pdata);
+	msm_fb_register_device("mipi_dsi", &mipi_dsi_pdata);
+}
 
 static void __init size_pmem_devices(void)
 {
@@ -849,10 +977,9 @@ static void __init reserve_memory_for(struct android_pmem_platform_data *p)
 static void __init reserve_pmem_memory(void)
 {
 #ifdef CONFIG_ANDROID_PMEM
-	unsigned int i;
-	for (i = 0; i < ARRAY_SIZE(pmem_pdata_array); ++i)
-		reserve_memory_for(pmem_pdata_array[i]);
-
+	reserve_memory_for(&android_pmem_adsp_pdata);
+	reserve_memory_for(&android_pmem_pdata);
+	reserve_memory_for(&android_pmem_audio_pdata);
 	msm7627a_reserve_table[MEMTYPE_EBI1].size += pmem_kernel_ebi1_size;
 #endif
 }
@@ -878,52 +1005,26 @@ static void __init msm7627a_reserve(void)
 {
 	reserve_info = &msm7627a_reserve_info;
 	msm_reserve();
-	memblock_remove(MSM8625_WARM_BOOT_PHYS, SZ_32);
 }
 
-static void __init msm8625_reserve(void)
-{
-	memblock_remove(MSM8625_SECONDARY_PHYS, SZ_8);
-	memblock_remove(MSM8625_NON_CACHE_MEM, SZ_2K);
-	msm7627a_reserve();
-}
-
-static void msmqrd_adsp_add_pdev(void)
-{
-	int rc = 0;
-	struct rpc_board_dev *rpc_adsp_pdev;
-
-	rpc_adsp_pdev = kzalloc(sizeof(struct rpc_board_dev), GFP_KERNEL);
-	if (rpc_adsp_pdev == NULL) {
-		pr_err("%s: Memory Allocation failure\n", __func__);
-		return;
-	}
-	rpc_adsp_pdev->prog = ADSP_RPC_PROG;
-
-	if (cpu_is_msm8625())
-		rpc_adsp_pdev->pdev = msm8625_device_adsp;
-	else
-		rpc_adsp_pdev->pdev = msm_adsp_device;
-	rc = msm_rpc_add_board_dev(rpc_adsp_pdev, 1);
-	if (rc < 0) {
-		pr_err("%s: return val: %d\n",	__func__, rc);
-		kfree(rpc_adsp_pdev);
-	}
-}
-
-static void __init msm7627a_device_i2c_init(void)
+static void __init msm_device_i2c_init(void)
 {
 	msm_gsbi0_qup_i2c_device.dev.platform_data = &msm_gsbi0_qup_i2c_pdata;
 	msm_gsbi1_qup_i2c_device.dev.platform_data = &msm_gsbi1_qup_i2c_pdata;
 }
 
-static void __init msm8625_device_i2c_init(void)
-{
-	msm8625_gsbi0_qup_i2c_device.dev.platform_data
-					= &msm_gsbi0_qup_i2c_pdata;
-	msm8625_gsbi1_qup_i2c_device.dev.platform_data
-					= &msm_gsbi1_qup_i2c_pdata;
-}
+static struct msm_handset_platform_data hs_platform_data = {
+	.hs_name = "7k_handset",
+	.pwr_key_delay_ms = 500, /* 0 will disable end key */
+};
+
+static struct platform_device hs_pdev = {
+	.name   = "msm-handset",
+	.id     = -1,
+	.dev    = {
+		.platform_data = &hs_platform_data,
+	},
+};
 
 static struct platform_device msm_proccomm_regulator_dev = {
 	.name   = PROCCOMM_REGULATOR_DEV_NAME,
@@ -941,130 +1042,35 @@ static void __init msm7627a_init_regulators(void)
 				__func__, rc);
 }
 
-static int __init msm_qrd_init_ar6000pm(void)
-{
-	msm_wlan_ar6000_pm_device.dev.platform_data = &ar600x_wlan_power;
-	return platform_device_register(&msm_wlan_ar6000_pm_device);
-}
-
-static void __init msm_add_footswitch_devices(void)
-{
-	platform_add_devices(msm_footswitch_devices,
-				msm_num_footswitch_devices);
-}
-
-static void __init add_platform_devices(void)
-{
-	if (machine_is_msm8625_evb() || machine_is_msm8625_qrd7()
-				|| machine_is_msm8625_evt()) {
-		platform_add_devices(msm8625_evb_devices,
-				ARRAY_SIZE(msm8625_evb_devices));
-		platform_add_devices(qrd3_devices,
-				ARRAY_SIZE(qrd3_devices));
-	} else {
-		platform_add_devices(qrd7627a_devices,
-				ARRAY_SIZE(qrd7627a_devices));
-	}
-
-	if (machine_is_msm7627a_qrd3() || machine_is_msm7627a_evb())
-		platform_add_devices(qrd3_devices,
-				ARRAY_SIZE(qrd3_devices));
-
-	if (machine_is_msm7627a_evb() || machine_is_msm8625_evb()
-				|| machine_is_msm8625_evt())
-		platform_add_devices(msm8625_lcd_camera_devices,
-				ARRAY_SIZE(msm8625_lcd_camera_devices));
-	else if (machine_is_msm8625_qrd7())
-		platform_add_devices(sku3_1_lcd_camera_devices,
-				ARRAY_SIZE(sku3_1_lcd_camera_devices));
-	else if (machine_is_msm7627a_qrd3()) {
-		u32 socinfo = socinfo_get_platform_type();
-		if (socinfo == 0x0B)
-			platform_add_devices(sku3_lcd_camera_devices,
-					ARRAY_SIZE(sku3_lcd_camera_devices));
-		else if (socinfo == 0x0F)
-			platform_add_devices(sku3_1_lcd_camera_devices,
-					ARRAY_SIZE(sku3_1_lcd_camera_devices));
-	}
-
-	platform_add_devices(common_devices,
-			ARRAY_SIZE(common_devices));
-}
-
 #define UART1DM_RX_GPIO		45
-static void __init qrd7627a_uart1dm_config(void)
-{
-	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(UART1DM_RX_GPIO);
-	if (cpu_is_msm8625())
-		msm8625_device_uart_dm1.dev.platform_data =
-			&msm_uart_dm1_pdata;
-	else
-		msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
-}
-
-static void __init qrd7627a_otg_gadget(void)
-{
-	if (cpu_is_msm8625()) {
-		msm_otg_pdata.swfi_latency = msm8625_pm_data
-		[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT].latency;
-		msm8625_device_otg.dev.platform_data = &msm_otg_pdata;
-		msm8625_device_gadget_peripheral.dev.platform_data =
-					&msm_gadget_pdata;
-
-	} else {
-	msm_otg_pdata.swfi_latency = msm7627a_pm_data
-		[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency;
-		msm_device_otg.dev.platform_data = &msm_otg_pdata;
-		msm_device_gadget_peripheral.dev.platform_data =
-					&msm_gadget_pdata;
-	}
-}
-
-static void __init msm_pm_init(void)
-{
-
-	if (!cpu_is_msm8625()) {
-		msm_pm_set_platform_data(msm7627a_pm_data,
-				ARRAY_SIZE(msm7627a_pm_data));
-		BUG_ON(msm_pm_boot_init(&msm_pm_boot_pdata));
-	} else {
-		msm_pm_set_platform_data(msm8625_pm_data,
-				ARRAY_SIZE(msm8625_pm_data));
-		BUG_ON(msm_pm_boot_init(&msm_pm_8625_boot_pdata));
-		msm8x25_spm_device_init();
-		msm_pm_register_cpr_ops();
-	}
-}
-
-static void __init msm_qrd_init(void)
+static void __init msm_qrd1_init(void)
 {
 	msm7x2x_misc_init();
 	msm7627a_init_regulators();
-	msmqrd_adsp_add_pdev();
+	msm_device_i2c_init();
+#ifdef CONFIG_SERIAL_MSM_HS
+	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(UART1DM_RX_GPIO);
+	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
+#endif
 
-	if (cpu_is_msm8625())
-		msm8625_device_i2c_init();
-	else
-		msm7627a_device_i2c_init();
-
-	/* uart1dm*/
-	qrd7627a_uart1dm_config();
-	/*OTG gadget*/
-	qrd7627a_otg_gadget();
-
-	msm_add_footswitch_devices();
-	add_platform_devices();
-
-	/* Ensure ar6000pm device is registered before MMC/SDC */
-	msm_qrd_init_ar6000pm();
+#ifdef CONFIG_USB_MSM_OTG_72K
+	msm_otg_pdata.swfi_latency = msm7627a_pm_data
+		[MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT].latency;
+	msm_device_otg.dev.platform_data = &msm_otg_pdata;
+#endif
+	msm_device_gadget_peripheral.dev.platform_data =
+		&msm_gadget_pdata;
+	platform_add_devices(qrd1_devices,
+			ARRAY_SIZE(qrd1_devices));
 	msm7627a_init_mmc();
 
 #ifdef CONFIG_USB_EHCI_MSM_72K
 	msm7627a_init_host();
 #endif
-	msm_pm_init();
+	msm_pm_set_platform_data(msm7627a_pm_data,
+				ARRAY_SIZE(msm7627a_pm_data));
+	BUG_ON(msm_pm_boot_init(&msm_pm_boot_pdata));
 
-	msm_pm_register_irqs();
 	msm_fb_add_devices();
 
 #if defined(CONFIG_BT) && defined(CONFIG_MARIMBA_CORE)
@@ -1072,9 +1078,18 @@ static void __init msm_qrd_init(void)
 #endif
 
 	msm7627a_camera_init();
-	qrd7627a_add_io_devices();
-	msm7x25a_kgsl_3d0_init();
-	msm8x25_kgsl_3d0_init();
+
+#if defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C) || \
+	defined(CONFIG_TOUCHSCREEN_SYNAPTICS_RMI4_I2C_MODULE)
+	i2c_register_board_info(MSM_GSBI1_QUP_I2C_BUS_ID,
+				synaptic_i2c_clearpad3k,
+				ARRAY_SIZE(synaptic_i2c_clearpad3k));
+#endif
+	platform_device_register(&hs_pdev);
+
+#ifdef CONFIG_MSM_RPC_VIBRATOR
+	msm_init_pmic_vibrator();
+#endif
 }
 
 static void __init qrd7627a_init_early(void)
@@ -1087,58 +1102,8 @@ MACHINE_START(MSM7627A_QRD1, "QRD MSM7627a QRD1")
 	.map_io		= msm_common_io_init,
 	.reserve	= msm7627a_reserve,
 	.init_irq	= msm_init_irq,
-	.init_machine	= msm_qrd_init,
+	.init_machine	= msm_qrd1_init,
 	.timer		= &msm_timer,
 	.init_early	= qrd7627a_init_early,
 	.handle_irq	= vic_handle_irq,
-MACHINE_END
-MACHINE_START(MSM7627A_QRD3, "QRD MSM7627a QRD3")
-	.boot_params	= PHYS_OFFSET + 0x100,
-	.map_io		= msm_common_io_init,
-	.reserve	= msm7627a_reserve,
-	.init_irq	= msm_init_irq,
-	.init_machine	= msm_qrd_init,
-	.timer		= &msm_timer,
-	.init_early	= qrd7627a_init_early,
-	.handle_irq	= vic_handle_irq,
-MACHINE_END
-MACHINE_START(MSM7627A_EVB, "QRD MSM7627a EVB")
-	.boot_params	= PHYS_OFFSET + 0x100,
-	.map_io		= msm_common_io_init,
-	.reserve	= msm7627a_reserve,
-	.init_irq	= msm_init_irq,
-	.init_machine	= msm_qrd_init,
-	.timer		= &msm_timer,
-	.init_early	= qrd7627a_init_early,
-	.handle_irq	= vic_handle_irq,
-MACHINE_END
-MACHINE_START(MSM8625_EVB, "QRD MSM8625 EVB")
-	.boot_params	= PHYS_OFFSET + 0x100,
-	.map_io		= msm8625_map_io,
-	.reserve	= msm8625_reserve,
-	.init_irq	= msm8625_init_irq,
-	.init_machine	= msm_qrd_init,
-	.timer		= &msm_timer,
-	.init_early	= qrd7627a_init_early,
-	.handle_irq	= gic_handle_irq,
-MACHINE_END
-MACHINE_START(MSM8625_QRD7, "QRD MSM8625 QRD7")
-	.boot_params	= PHYS_OFFSET + 0x100,
-	.map_io		= msm8625_map_io,
-	.reserve	= msm8625_reserve,
-	.init_irq	= msm8625_init_irq,
-	.init_machine	= msm_qrd_init,
-	.timer		= &msm_timer,
-	.init_early	= qrd7627a_init_early,
-	.handle_irq	= gic_handle_irq,
-MACHINE_END
-MACHINE_START(MSM8625_EVT, "QRD MSM8625 EVT")
-	.boot_params	= PHYS_OFFSET + 0x100,
-	.map_io		= msm8625_map_io,
-	.reserve	= msm8625_reserve,
-	.init_irq	= msm8625_init_irq,
-	.init_machine	= msm_qrd_init,
-	.timer		= &msm_timer,
-	.init_early	= qrd7627a_init_early,
-	.handle_irq	= gic_handle_irq,
 MACHINE_END

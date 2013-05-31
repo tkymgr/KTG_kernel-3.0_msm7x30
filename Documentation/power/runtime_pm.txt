@@ -583,39 +583,6 @@ to do this is:
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
 
-The PM core always increments the run-time usage counter before calling the
-->suspend() callback and decrements it after calling the ->resume() callback.
-Hence disabling run-time PM temporarily like this will not cause any runtime
-suspend attempts to be permanently lost.  If the usage count goes to zero
-following the return of the ->resume() callback, the ->runtime_idle() callback
-will be invoked as usual.
-
-On some systems, however, system sleep is not entered through a global firmware
-or hardware operation.  Instead, all hardware components are put into low-power
-states directly by the kernel in a coordinated way.  Then, the system sleep
-state effectively follows from the states the hardware components end up in
-and the system is woken up from that state by a hardware interrupt or a similar
-mechanism entirely under the kernel's control.  As a result, the kernel never
-gives control away and the states of all devices during resume are precisely
-known to it.  If that is the case and none of the situations listed above takes
-place (in particular, if the system is not waking up from hibernation), it may
-be more efficient to leave the devices that had been suspended before the system
-suspend began in the suspended state.
-
-The PM core does its best to reduce the probability of race conditions between
-the runtime PM and system suspend/resume (and hibernation) callbacks by carrying
-out the following operations:
-
-  * During system suspend it calls pm_runtime_get_noresume() and
-    pm_runtime_barrier() for every device right before executing the
-    subsystem-level .suspend() callback for it.  In addition to that it calls
-    pm_runtime_disable() for every device right after executing the
-    subsystem-level .suspend() callback for it.
-
-  * During system resume it calls pm_runtime_enable() and pm_runtime_put_sync()
-    for every device right before and right after executing the subsystem-level
-    .resume() callback for it, respectively.
-
 7. Generic subsystem callbacks
 
 Subsystems may wish to conserve code space by using the set of generic power
@@ -741,16 +708,6 @@ Drivers may also continue to use the non-autosuspend helper functions; they
 will behave normally, not taking the autosuspend delay into account.
 Similarly, if the power.use_autosuspend field isn't set then the autosuspend
 helper functions will behave just like the non-autosuspend counterparts.
-
-Under some circumstances a driver or subsystem may want to prevent a device
-from autosuspending immediately, even though the usage counter is zero and the
-autosuspend delay time has expired.  If the ->runtime_suspend() callback
-returns -EAGAIN or -EBUSY, and if the next autosuspend delay expiration time is
-in the future (as it normally would be if the callback invoked
-pm_runtime_mark_last_busy()), the PM core will automatically reschedule the
-autosuspend.  The ->runtime_suspend() callback can't do this rescheduling
-itself because no suspend requests of any kind are accepted while the device is
-suspending (i.e., while the callback is running).
 
 The implementation is well suited for asynchronous use in interrupt contexts.
 However such use inevitably involves races, because the PM core can't

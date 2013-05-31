@@ -386,7 +386,6 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_XVID     v4l2_fourcc('X', 'V', 'I', 'D') /* Xvid           */
 #define V4L2_PIX_FMT_VC1_ANNEX_G v4l2_fourcc('V', 'C', '1', 'G') /* SMPTE 421M Annex G compliant stream */
 #define V4L2_PIX_FMT_VC1_ANNEX_L v4l2_fourcc('V', 'C', '1', 'L') /* SMPTE 421M Annex L compliant stream */
-#define V4L2_PIX_FMT_DIVX_311  v4l2_fourcc('D', 'I', 'V', '3') /* DIVX        */
 
 /*  Vendor-specific formats   */
 #define V4L2_PIX_FMT_CPIA1    v4l2_fourcc('C', 'P', 'I', 'A') /* cpia1 YUV */
@@ -653,11 +652,6 @@ struct v4l2_buffer {
 #define V4L2_BUF_FLAG_ERROR	0x0040
 #define V4L2_BUF_FLAG_TIMECODE	0x0100	/* timecode field is valid */
 #define V4L2_BUF_FLAG_INPUT     0x0200  /* input field is valid */
-#define V4L2_BUF_FLAG_PREPARED	0x0400	/* Buffer is prepared for queuing */
-/* Cache handling flags */
-#define V4L2_BUF_FLAG_NO_CACHE_INVALIDATE	0x0800
-#define V4L2_BUF_FLAG_NO_CACHE_CLEAN		0x1000
-#define V4L2_BUF_FLAG_EOS		0x2000
 
 /*
  *	O V E R L A Y   P R E V I E W
@@ -1095,7 +1089,6 @@ struct v4l2_querymenu {
 #define V4L2_CTRL_FLAG_NEXT_CTRL	0x80000000
 
 /*  User-class control IDs defined by V4L2 */
-#define V4L2_CID_MAX_CTRLS		1024
 #define V4L2_CID_BASE			(V4L2_CTRL_CLASS_USER | 0x900)
 #define V4L2_CID_USER_BASE 		V4L2_CID_BASE
 /*  IDs reserved for driver specific controls */
@@ -1169,8 +1162,8 @@ enum v4l2_colorfx {
 #define V4L2_CID_MIN_BUFFERS_FOR_OUTPUT		(V4L2_CID_BASE+40)
 
 /* last CID + 1 */
-#define V4L2_CID_LASTP1                         (V4L2_CID_BASE+42)
-#define V4L2_CID_SPECIAL_EFFECT			(V4L2_CID_BASE+43)
+#define V4L2_CID_LASTP1                         (V4L2_CID_BASE+41)
+
 /* Minimum number of buffer neede by the device */
 
 /*  MPEG-class control IDs defined by V4L2 */
@@ -1460,7 +1453,6 @@ enum v4l2_mpeg_video_h264_vui_sar_idc {
 #define V4L2_CID_MPEG_VIDEO_MPEG4_MIN_QP	(V4L2_CID_MPEG_BASE+403)
 #define V4L2_CID_MPEG_VIDEO_MPEG4_MAX_QP	(V4L2_CID_MPEG_BASE+404)
 #define V4L2_CID_MPEG_VIDEO_MPEG4_LEVEL		(V4L2_CID_MPEG_BASE+405)
-
 enum v4l2_mpeg_video_mpeg4_level {
 	V4L2_MPEG_VIDEO_MPEG4_LEVEL_0	= 0,
 	V4L2_MPEG_VIDEO_MPEG4_LEVEL_0B	= 1,
@@ -1556,96 +1548,6 @@ enum v4l2_mpeg_mfc51_video_force_frame_type {
 #define V4L2_CID_MPEG_MFC51_VIDEO_H264_ADAPTIVE_RC_STATIC		(V4L2_CID_MPEG_MFC51_BASE+53)
 #define V4L2_CID_MPEG_MFC51_VIDEO_H264_NUM_REF_PIC_FOR_P		(V4L2_CID_MPEG_MFC51_BASE+54)
 
-/*  MPEG-class control IDs specific to the msm_vidc driver */
-#define V4L2_CID_MPEG_MSM_VIDC_BASE		(V4L2_CTRL_CLASS_MPEG | 0x2000)
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_ENABLE_PICTURE_TYPE \
-			(V4L2_CID_MPEG_MSM_VIDC_BASE+0)
-#define V4L2_CID_MPEG_VIDC_VIDEO_KEEP_ASPECT_RATIO \
-			(V4L2_CID_MPEG_MSM_VIDC_BASE+1)
-#define V4L2_CID_MPEG_VIDC_VIDEO_POST_LOOP_DEBLOCKER_MODE \
-			(V4L2_CID_MPEG_MSM_VIDC_BASE+2)
-#define V4L2_CID_MPEG_VIDC_VIDEO_DIVX_FORMAT \
-			(V4L2_CID_MPEG_MSM_VIDC_BASE+3)
-enum v4l2_mpeg_vidc_video_divx_format_type {
-	V4L2_MPEG_VIDC_VIDEO_DIVX_FORMAT_4		= 0,
-	V4L2_MPEG_VIDC_VIDEO_DIVX_FORMAT_5		= 1,
-	V4L2_MPEG_VIDC_VIDEO_DIVX_FORMAT_6	    = 2,
-};
-#define V4L2_CID_MPEG_VIDC_VIDEO_MB_ERROR_MAP_REPORTING	\
-			(V4L2_CID_MPEG_MSM_VIDC_BASE+4)
-#define V4L2_CID_MPEG_VIDC_VIDEO_CONTINUE_DATA_TRANSFER \
-			(V4L2_CID_MPEG_MSM_VIDC_BASE+5)
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_STREAM_FORMAT   (V4L2_CID_MPEG_MSM_VIDC_BASE+6)
-enum v4l2_mpeg_vidc_video_stream_format {
-	V4L2_MPEG_VIDC_VIDEO_NAL_FORMAT_STARTCODES         = 0,
-	V4L2_MPEG_VIDC_VIDEO_NAL_FORMAT_ONE_NAL_PER_BUFFER = 1,
-	V4L2_MPEG_VIDC_VIDEO_NAL_FORMAT_ONE_BYTE_LENGTH    = 2,
-	V4L2_MPEG_VIDC_VIDEO_NAL_FORMAT_TWO_BYTE_LENGTH    = 3,
-	V4L2_MPEG_VIDC_VIDEO_NAL_FORMAT_FOUR_BYTE_LENGTH   = 4,
-};
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_OUTPUT_ORDER   (V4L2_CID_MPEG_MSM_VIDC_BASE+7)
-enum v4l2_mpeg_vidc_video_output_order {
-	V4L2_MPEG_VIDC_VIDEO_OUTPUT_ORDER_DISPLAY         = 0,
-	V4L2_MPEG_VIDC_VIDEO_OUTPUT_ORDER_DECODE          = 1,
-};
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_FRAME_RATE   (V4L2_CID_MPEG_MSM_VIDC_BASE+8)
-#define V4L2_CID_MPEG_VIDC_VIDEO_IDR_PERIOD   (V4L2_CID_MPEG_MSM_VIDC_BASE+9)
-#define V4L2_CID_MPEG_VIDC_VIDEO_NUM_P_FRAMES (V4L2_CID_MPEG_MSM_VIDC_BASE+10)
-#define V4L2_CID_MPEG_VIDC_VIDEO_NUM_B_FRAMES (V4L2_CID_MPEG_MSM_VIDC_BASE+11)
-#define V4L2_CID_MPEG_VIDC_VIDEO_REQUEST_IFRAME (V4L2_CID_MPEG_MSM_VIDC_BASE+12)
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_RATE_CONTROL (V4L2_CID_MPEG_MSM_VIDC_BASE+13)
-enum v4l2_mpeg_vidc_video_rate_control {
-	V4L2_CID_MPEG_VIDC_VIDEO_RATE_CONTROL_OFF = 0,
-	V4L2_CID_MPEG_VIDC_VIDEO_RATE_CONTROL_VBR_VFR = 1,
-	V4L2_CID_MPEG_VIDC_VIDEO_RATE_CONTROL_VBR_CFR = 2,
-	V4L2_CID_MPEG_VIDC_VIDEO_RATE_CONTROL_CBR_VFR = 3,
-	V4L2_CID_MPEG_VIDC_VIDEO_RATE_CONTROL_CBR_CFR = 4,
-};
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_ROTATION (V4L2_CID_MPEG_MSM_VIDC_BASE+14)
-enum v4l2_mpeg_vidc_video_rotation {
-	V4L2_CID_MPEG_VIDC_VIDEO_ROTATION_NONE = 0,
-	V4L2_CID_MPEG_VIDC_VIDEO_ROTATION_90 = 1,
-	V4L2_CID_MPEG_VIDC_VIDEO_ROTATION_180 = 2,
-	V4L2_CID_MPEG_VIDC_VIDEO_ROTATION_270 = 3,
-};
-#define MSM_VIDC_BASE V4L2_CID_MPEG_MSM_VIDC_BASE
-#define V4L2_CID_MPEG_VIDC_VIDEO_H264_CABAC_MODEL (MSM_VIDC_BASE+15)
-enum v4l2_mpeg_vidc_h264_cabac_model {
-	V4L2_CID_MPEG_VIDC_VIDEO_H264_CABAC_MODEL_0 = 0,
-	V4L2_CID_MPEG_VIDC_VIDEO_H264_CABAC_MODEL_1 = 1,
-	V4L2_CID_MPEG_VIDC_VIDEO_H264_CABAC_MODEL_2 = 2,
-};
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_INTRA_REFRESH_MODE (MSM_VIDC_BASE+16)
-enum v4l2_mpeg_vidc_video_intra_refresh_mode {
-	V4L2_CID_MPEG_VIDC_VIDEO_INTRA_REFRESH_NONE = 0,
-	V4L2_CID_MPEG_VIDC_VIDEO_INTRA_REFRESH_CYCLIC = 1,
-	V4L2_CID_MPEG_VIDC_VIDEO_INTRA_REFRESH_ADAPTIVE = 2,
-	V4L2_CID_MPEG_VIDC_VIDEO_INTRA_REFRESH_CYCLIC_ADAPTIVE = 3,
-	V4L2_CID_MPEG_VIDC_VIDEO_INTRA_REFRESH_RANDOM = 4,
-};
-#define V4L2_CID_MPEG_VIDC_VIDEO_AIR_MBS (V4L2_CID_MPEG_MSM_VIDC_BASE+17)
-#define V4L2_CID_MPEG_VIDC_VIDEO_AIR_REF (V4L2_CID_MPEG_MSM_VIDC_BASE+18)
-#define V4L2_CID_MPEG_VIDC_VIDEO_CIR_MBS (V4L2_CID_MPEG_MSM_VIDC_BASE+19)
-
-#define V4L2_CID_MPEG_VIDC_VIDEO_H264_AU_DELIMITER \
-		(V4L2_CID_MPEG_MSM_VIDC_BASE + 22)
-enum v4l2_mpeg_vidc_video_h264_au_delimiter {
-	V4L2_MPEG_VIDC_VIDEO_H264_AU_DELIMITER_DISABLED = 0,
-	V4L2_MPEG_VIDC_VIDEO_H264_AU_DELIMITER_ENABLED = 1
-};
-#define V4L2_CID_MPEG_VIDC_VIDEO_H264_VUI_TIMING_INFO \
-		(V4L2_CID_MPEG_MSM_VIDC_BASE + 23)
-enum v4l2_mpeg_vidc_video_h264_vui_timing_info {
-	V4L2_MPEG_VIDC_VIDEO_H264_VUI_TIMING_INFO_DISABLED = 0,
-	V4L2_MPEG_VIDC_VIDEO_H264_VUI_TIMING_INFO_ENABLED = 1
-};
 /*  Camera class control IDs */
 #define V4L2_CID_CAMERA_CLASS_BASE 	(V4L2_CTRL_CLASS_CAMERA | 0x900)
 #define V4L2_CID_CAMERA_CLASS 		(V4L2_CTRL_CLASS_CAMERA | 1)
@@ -1877,56 +1779,6 @@ struct v4l2_encoder_cmd {
 	};
 };
 
-#define V4L2_QCOM_BUF_FLAG_CODECCONFIG	0x4000
-
-/* Decoder commands */
-#define V4L2_DEC_CMD_START       (0)
-#define V4L2_DEC_CMD_STOP        (1)
-#define V4L2_DEC_CMD_PAUSE       (2)
-#define V4L2_DEC_CMD_RESUME      (3)
-
-/* Flags for V4L2_DEC_CMD_START */
-#define V4L2_DEC_CMD_START_MUTE_AUDIO	(1 << 0)
-
-/* Flags for V4L2_DEC_CMD_PAUSE */
-#define V4L2_DEC_CMD_PAUSE_TO_BLACK	(1 << 0)
-
-/* Flags for V4L2_DEC_CMD_STOP */
-#define V4L2_DEC_CMD_STOP_TO_BLACK	(1 << 0)
-#define V4L2_DEC_CMD_STOP_IMMEDIATELY	(1 << 1)
-
-/* Play format requirements (returned by the driver): */
-
-/* The decoder has no special format requirements */
-#define V4L2_DEC_START_FMT_NONE		(0)
-/* The decoder requires full GOPs */
-#define V4L2_DEC_START_FMT_GOP		(1)
-
-/* The structure must be zeroed before use by the application
-   This ensures it can be extended safely in the future. */
-struct v4l2_decoder_cmd {
-	__u32 cmd;
-	__u32 flags;
-	union {
-		struct {
-			__u64 pts;
-		} stop;
-
-		struct {
-			/* 0 or 1000 specifies normal speed,
-			   1 specifies forward single stepping,
-			   -1 specifies backward single stepping,
-			   >1: playback at speed/1000 of the normal speed,
-			   <-1: reverse playback at (-speed/1000) of the normal speed. */
-			__s32 speed;
-			__u32 format;
-		} start;
-
-		struct {
-			__u32 data[16];
-		} raw;
-	};
-};
 #endif
 
 
@@ -2189,15 +2041,6 @@ struct v4l2_dbg_chip_ident {
 	__u32 revision;    /* chip revision, chip specific */
 } __attribute__ ((packed));
 
-/* VIDIOC_CREATE_BUFS */
-struct v4l2_create_buffers {
-	__u32			index;		/* output: buffers index...index + count - 1 have been created */
-	__u32			count;
-	enum v4l2_memory        memory;
-	struct v4l2_format	format;		/* "type" is used always, the rest if sizeimage == 0 */
-	__u32			reserved[8];
-};
-
 /*
  *	I O C T L   C O D E S   F O R   V I D E O   D E V I C E S
  *
@@ -2287,20 +2130,6 @@ struct v4l2_create_buffers {
 #define	VIDIOC_DQEVENT		 _IOR('V', 89, struct v4l2_event)
 #define	VIDIOC_SUBSCRIBE_EVENT	 _IOW('V', 90, struct v4l2_event_subscription)
 #define	VIDIOC_UNSUBSCRIBE_EVENT _IOW('V', 91, struct v4l2_event_subscription)
-
-/* Experimental, the below two ioctls may change over the next couple of kernel
-   versions */
-#define VIDIOC_CREATE_BUFS	_IOWR('V', 92, struct v4l2_create_buffers)
-#define VIDIOC_PREPARE_BUF	_IOWR('V', 93, struct v4l2_buffer)
-
-/* Experimental selection API */
-#define VIDIOC_G_SELECTION	_IOWR('V', 94, struct v4l2_selection)
-#define VIDIOC_S_SELECTION	_IOWR('V', 95, struct v4l2_selection)
-
-/* Experimental, these two ioctls may change over the next couple of kernel
-   versions. */
-#define VIDIOC_DECODER_CMD	_IOWR('V', 96, struct v4l2_decoder_cmd)
-#define VIDIOC_TRY_DECODER_CMD	_IOWR('V', 97, struct v4l2_decoder_cmd)
 
 /* Reminder: when adding new ioctls please add support for them to
    drivers/media/video/v4l2-compat-ioctl32.c as well! */

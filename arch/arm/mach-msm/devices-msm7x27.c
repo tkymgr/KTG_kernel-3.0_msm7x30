@@ -35,8 +35,6 @@
 #include <mach/msm_hsusb.h>
 #include <mach/usbdiag.h>
 #include <mach/rpc_hsusb.h>
-#include "irq.h"
-#include "pm.h"
 
 static struct resource resources_uart1[] = {
 	{
@@ -45,8 +43,8 @@ static struct resource resources_uart1[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.start	= MSM7XXX_UART1_PHYS,
-		.end	= MSM7XXX_UART1_PHYS + MSM7XXX_UART1_SIZE - 1,
+		.start	= MSM_UART1_PHYS,
+		.end	= MSM_UART1_PHYS + MSM_UART1_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 };
@@ -58,8 +56,8 @@ static struct resource resources_uart2[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.start	= MSM7XXX_UART2_PHYS,
-		.end	= MSM7XXX_UART2_PHYS + MSM7XXX_UART2_SIZE - 1,
+		.start	= MSM_UART2_PHYS,
+		.end	= MSM_UART2_PHYS + MSM_UART2_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 };
@@ -76,21 +74,6 @@ struct platform_device msm_device_uart2 = {
 	.id	= 1,
 	.num_resources	= ARRAY_SIZE(resources_uart2),
 	.resource	= resources_uart2,
-};
-
-static struct resource resources_adsp[] = {
-	{
-		.start  = INT_ADSP_A9_A11,
-		.end    = INT_ADSP_A9_A11,
-		.flags  = IORESOURCE_IRQ,
-	},
-};
-
-struct platform_device msm_adsp_device = {
-	.name           = "msm_adsp",
-	.id             = -1,
-	.num_resources  = ARRAY_SIZE(resources_adsp),
-	.resource       = resources_adsp,
 };
 
 #define MSM_UART1DM_PHYS      0xA0200000
@@ -417,21 +400,6 @@ struct platform_device msm_device_dmov = {
 	},
 };
 
-static struct msm_pm_irq_calls msm7x27_pm_irq_calls = {
-	.irq_pending = msm_irq_pending,
-	.idle_sleep_allowed = msm_irq_idle_sleep_allowed,
-	.enter_sleep1 = msm_irq_enter_sleep1,
-	.enter_sleep2 = msm_irq_enter_sleep2,
-	.exit_sleep1 = msm_irq_exit_sleep1,
-	.exit_sleep2 = msm_irq_exit_sleep2,
-	.exit_sleep3 = msm_irq_exit_sleep3,
-};
-
-void __init msm_pm_register_irqs(void)
-{
-	msm_pm_set_irq_extns(&msm7x27_pm_irq_calls);
-}
-
 #define MSM_SDC1_BASE         0xA0400000
 #define MSM_SDC2_BASE         0xA0500000
 #define MSM_SDC3_BASE         0xA0600000
@@ -697,7 +665,7 @@ static struct platform_device msm_ebi2_lcd_device = {
 	.resource       = msm_ebi2_lcd_resources,
 };
 
-struct platform_device msm_lcdc_device = {
+static struct platform_device msm_lcdc_device = {
 	.name   = "lcdc",
 	.id     = 0,
 };
@@ -870,7 +838,7 @@ struct platform_device msm_kgsl_3d0 = {
 };
 
 struct platform_device *msm_footswitch_devices[] = {
-	FS_PCOM(FS_GFX3D,  "vdd", "kgsl-3d0.0"),
+	FS_PCOM(FS_GFX3D,  "fs_gfx3d"),
 };
 unsigned msm_num_footswitch_devices = ARRAY_SIZE(msm_footswitch_devices);
 

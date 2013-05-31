@@ -320,34 +320,12 @@ static isolate_migrate_t isolate_migratepages(struct zone *zone,
 		} else if (!locked)
 			spin_lock_irq(&zone->lru_lock);
 
-		/*
-		 * migrate_pfn does not necessarily start aligned to a
-		 * pageblock. Ensure that pfn_valid is called when moving
-		 * into a new MAX_ORDER_NR_PAGES range in case of large
-		 * memory holes within the zone
-		 */
-		if ((low_pfn & (MAX_ORDER_NR_PAGES - 1)) == 0) {
-			if (!pfn_valid(low_pfn)) {
-				low_pfn += MAX_ORDER_NR_PAGES - 1;
-				continue;
-			}
-		}
-
 		if (!pfn_valid_within(low_pfn))
 			continue;
 		nr_scanned++;
 
-		/*
-		 * Get the page and ensure the page is within the same zone.
-		 * See the comment in isolate_freepages about overlapping
-		 * nodes. It is deliberate that the new zone lock is not taken
-		 * as memory compaction should not move pages between nodes.
-		 */
+		/* Get the page and skip if free */
 		page = pfn_to_page(low_pfn);
-		if (page_zone(page) != zone)
-			continue;
-
-		/* Skip if free */
 		if (PageBuddy(page))
 			continue;
 
@@ -677,7 +655,7 @@ unsigned long try_to_compact_pages(struct zonelist *zonelist,
 
 
 /* Compact all zones within a node */
-static int compact_node(int nid)
+static int compact_node(int nid, bool sync)
 {
 	int zoneid;
 	pg_data_t *pgdat;
@@ -695,6 +673,7 @@ static int compact_node(int nid)
 			.nr_freepages = 0,
 			.nr_migratepages = 0,
 			.order = -1,
+			.sync = sync,
 		};
 
 		zone = &pgdat->node_zones[zoneid];
@@ -715,12 +694,12 @@ static int compact_node(int nid)
 }
 
 /* Compact all nodes in the system */
-static int compact_nodes(void)
+int compact_nodes(bool sync)
 {
 	int nid;
 
 	for_each_online_node(nid)
-		compact_node(nid);
+		compact_node(nid, sync);
 
 	return COMPACT_COMPLETE;
 }
@@ -733,7 +712,7 @@ int sysctl_compaction_handler(struct ctl_table *table, int write,
 			void __user *buffer, size_t *length, loff_t *ppos)
 {
 	if (write)
-		return compact_nodes();
+		return compact_nodes(true);
 
 	return 0;
 }

@@ -2,7 +2,7 @@
  *
  * aac audio input device
  *
- * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This code is based in part on arch/arm/mach-msm/qdsp5v2/audio_aac_in.c,
  * Copyright (C) 2008 Google, Inc.
@@ -40,6 +40,7 @@
 #include <mach/msm_rpcrouter.h>
 #include <mach/msm_memtypes.h>
 #include <mach/iommu.h>
+#include <mach/msm_subsystem_map.h>
 #include <mach/iommu_domains.h>
 
 #include <mach/msm_adsp.h>
@@ -140,8 +141,8 @@ struct audio_aac_in {
 	/* data allocated for various buffers */
 	char *data;
 	dma_addr_t phys;
-	void *map_v_read;
-	void *map_v_write;
+	struct msm_mapped_buffer *map_v_read;
+	struct msm_mapped_buffer *map_v_write;
 
 	int opened;
 	int enabled;
@@ -319,10 +320,9 @@ static int audaac_in_disable(struct audio_aac_in *audio)
 
 		audaac_in_dsp_enable(audio, 0);
 
+		wake_up(&audio->wait);
 		wait_event_interruptible_timeout(audio->wait_enable,
 				audio->running == 0, 1*HZ);
-		audio->stopped = 1;
-		wake_up(&audio->wait);
 		msm_adsp_disable(audio->audrec);
 		if (audio->mode == MSM_AUD_ENC_MODE_TUNNEL) {
 			msm_adsp_disable(audio->audpre);
@@ -697,23 +697,21 @@ static void audaac_ioport_reset(struct audio_aac_in *audio)
 	 * sleep and knowing that system is not able
 	 * to process io request at the moment
 	 */
-	wake_up(&audio->wait);
-	mutex_lock(&audio->read_lock);
-	audaac_in_flush(audio);
-	mutex_unlock(&audio->read_lock);
 	wake_up(&audio->write_wait);
 	mutex_lock(&audio->write_lock);
-	audaac_out_flush(audio);
+	audaac_in_flush(audio);
 	mutex_unlock(&audio->write_lock);
+	wake_up(&audio->wait);
+	mutex_lock(&audio->read_lock);
+	audaac_out_flush(audio);
+	mutex_unlock(&audio->read_lock);
 }
 
 static void audaac_in_flush(struct audio_aac_in *audio)
 {
 	int i;
-	unsigned long flags;
 
 	audio->dsp_cnt = 0;
-	spin_lock_irqsave(&audio->dsp_lock, flags);
 	audio->in_head = 0;
 	audio->in_tail = 0;
 	audio->in_count = 0;
@@ -722,7 +720,6 @@ static void audaac_in_flush(struct audio_aac_in *audio)
 		audio->in[i].size = 0;
 		audio->in[i].read = 0;
 	}
-	spin_unlock_irqrestore(&audio->dsp_lock, flags);
 	MM_DBG("in_bytes %d\n", atomic_read(&audio->in_bytes));
 	MM_DBG("in_samples %d\n", atomic_read(&audio->in_samples));
 	atomic_set(&audio->in_bytes, 0);
@@ -732,18 +729,15 @@ static void audaac_in_flush(struct audio_aac_in *audio)
 static void audaac_out_flush(struct audio_aac_in *audio)
 {
 	int i;
-	unsigned long flags;
 
 	audio->out_head = 0;
-	audio->out_count = 0;
-	spin_lock_irqsave(&audio->dsp_lock, flags);
 	audio->out_tail = 0;
+	audio->out_count = 0;
 	for (i = OUT_FRAME_NUM-1; i >= 0; i--) {
 		audio->out[i].size = 0;
 		audio->out[i].read = 0;
 		audio->out[i].used = 0;
 	}
-	spin_unlock_irqrestore(&audio->dsp_lock, flags);
 }
 
 /* ------------------- device --------------------- */
@@ -783,6 +777,7 @@ static long audaac_in_ioctl(struct file *file,
 	}
 	case AUDIO_STOP: {
 		rc = audaac_in_disable(audio);
+		audio->stopped = 1;
 		break;
 	}
 	case AUDIO_FLUSH: {
@@ -1248,13 +1243,13 @@ static int audaac_in_release(struct inode *inode, struct file *file)
 
 	if ((audio->mode == MSM_AUD_ENC_MODE_NONTUNNEL) && \
 	   (audio->out_data)) {
-		iounmap(audio->map_v_write);
+		msm_subsystem_unmap_buffer(audio->map_v_write);
 		free_contiguous_memory_by_paddr(audio->out_phys);
 		audio->out_data = NULL;
 	}
 
 	if (audio->data) {
-		iounmap(audio->map_v_read);
+		msm_subsystem_unmap_buffer(audio->map_v_read);
 		free_contiguous_memory_by_paddr(audio->phys);
 		audio->data = NULL;
 	}
@@ -1354,15 +1349,16 @@ static int audaac_in_open(struct inode *inode, struct file *file)
 
 	audio->phys = allocate_contiguous_ebi_nomap(dma_size, SZ_4K);
 	if (audio->phys) {
-		audio->map_v_read = ioremap(
-					audio->phys, dma_size);
+		audio->map_v_read = msm_subsystem_map_buffer(
+					audio->phys, dma_size,
+					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
 		if (IS_ERR(audio->map_v_read)) {
 			MM_ERR("could not map DMA buffers\n");
 			rc = -ENOMEM;
 			free_contiguous_memory_by_paddr(audio->phys);
 			goto evt_error;
 		}
-		audio->data = audio->map_v_read;
+		audio->data = audio->map_v_read->vaddr;
 	} else {
 		MM_ERR("could not allocate read buffers\n");
 		rc = -ENOMEM;
@@ -1378,22 +1374,23 @@ static int audaac_in_open(struct inode *inode, struct file *file)
 		if (!audio->out_phys) {
 			MM_ERR("could not allocate write buffers\n");
 			rc = -ENOMEM;
-			iounmap(audio->map_v_read);
+			msm_subsystem_unmap_buffer(audio->map_v_read);
 			free_contiguous_memory_by_paddr(audio->phys);
 			goto evt_error;
 		} else {
-			audio->map_v_write = ioremap(
-					audio->out_phys, BUFFER_SIZE);
+			audio->map_v_write = msm_subsystem_map_buffer(
+					audio->out_phys, BUFFER_SIZE,
+					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
 			if (IS_ERR(audio->map_v_write)) {
 				MM_ERR("could not map write phys address\n");
 				rc = -ENOMEM;
-				iounmap(audio->map_v_read);
+				msm_subsystem_unmap_buffer(audio->map_v_read);
 				free_contiguous_memory_by_paddr(audio->phys);
 				free_contiguous_memory_by_paddr(\
 						audio->out_phys);
 				goto evt_error;
 			}
-			audio->out_data = audio->map_v_write;
+			audio->out_data = audio->map_v_write->vaddr;
 			MM_DBG("wr buf: phy addr 0x%08x kernel addr 0x%08x\n",
 					audio->out_phys, (int)audio->out_data);
 		}

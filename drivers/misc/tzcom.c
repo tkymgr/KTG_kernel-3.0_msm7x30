@@ -35,7 +35,6 @@
 #include <mach/peripheral-loader.h>
 #include <mach/msm_bus.h>
 #include <mach/msm_bus_board.h>
-#include <mach/socinfo.h>
 #include "tzcomi.h"
 
 #define TZCOM_DEV "tzcom"
@@ -106,10 +105,6 @@ static int tzcom_enable_bus_scaling(void)
 	int ret = 0;
 	if (!tzcom_perf_client)
 		return -EINVAL;
-
-	if (IS_ERR_OR_NULL(tzcom_bus_clk))
-		return -EINVAL;
-
 	mutex_lock(&tzcom_bw_mutex);
 	if (!tzcom_bw_count) {
 		ret = msm_bus_scale_client_update_request(
@@ -133,9 +128,6 @@ static int tzcom_enable_bus_scaling(void)
 static void tzcom_disable_bus_scaling(void)
 {
 	if (!tzcom_perf_client)
-		return ;
-
-	if (IS_ERR_OR_NULL(tzcom_bus_clk))
 		return ;
 
 	mutex_lock(&tzcom_bw_mutex);
@@ -1185,18 +1177,19 @@ static int __init tzcom_init(void)
 	/* Initialized in tzcom_open */
 	pil = NULL;
 
-	tzcom_perf_client = msm_bus_scale_register_client(
-					&tzcom_bus_pdata);
-	if (!tzcom_perf_client)
+	tzcom_perf_client = msm_bus_scale_register_client(&tzcom_bus_pdata);
+	if (!tzcom_perf_client) {
 		pr_err("Unable to register bus client");
-
+		BUG();
+	}
 	tzcom_bus_clk = clk_get(class_dev, "bus_clk");
 	if (IS_ERR(tzcom_bus_clk)) {
-		tzcom_bus_clk = NULL;
-	} else  if (tzcom_bus_clk != NULL) {
-		pr_debug("Enabled DFAB clock\n");
+		pr_err("unable to get bus clk\n");
+	} else {
+		pr_warn("Enabled clock\n");
 		clk_set_rate(tzcom_bus_clk, 64000000);
 	}
+
 	return 0;
 
 class_device_destroy:
@@ -1231,7 +1224,10 @@ static void __exit tzcom_exit(void)
 		pil_put(pil);
 		pil = NULL;
 	}
-	clk_put(tzcom_bus_clk);
+	if (!IS_ERR_OR_NULL(tzcom_bus_clk)) {
+		pr_warn("Disabled clock\n");
+		clk_put(tzcom_bus_clk);
+	}
 	device_destroy(driver_class, tzcom_device_no);
 	class_destroy(driver_class);
 	unregister_chrdev_region(tzcom_device_no, 1);

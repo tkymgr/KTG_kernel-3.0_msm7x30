@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,7 +18,6 @@
 #include <linux/spinlock.h>
 
 #include <mach/usb_gadget_xport.h>
-#include <mach/usb_bam.h>
 
 #include "u_rmnet.h"
 #include "gadget_chips.h"
@@ -26,6 +25,11 @@
 #define RMNET_NOTIFY_INTERVAL	5
 #define RMNET_MAX_NOTIFY_SIZE	sizeof(struct usb_cdc_notification)
 
+struct rmnet_descs {
+	struct usb_endpoint_descriptor	*in;
+	struct usb_endpoint_descriptor	*out;
+	struct usb_endpoint_descriptor	*notify;
+};
 
 #define ACM_CTRL_DTR	(1 << 0)
 
@@ -42,8 +46,13 @@ struct f_rmnet {
 
 	spinlock_t			lock;
 
+	/* usb descriptors */
+	struct rmnet_descs		fs;
+	struct rmnet_descs		hs;
+
 	/* usb eps*/
 	struct usb_ep			*notify;
+	struct usb_endpoint_descriptor	*notify_desc;
 	struct usb_request		*notify_req;
 
 	/* control info */
@@ -52,15 +61,13 @@ struct f_rmnet {
 	unsigned long			cpkts_len;
 };
 
-#define NR_RMNET_PORTS	3
+#define NR_RMNET_PORTS	1
 static unsigned int nr_rmnet_ports;
 static unsigned int no_ctrl_smd_ports;
 static unsigned int no_ctrl_hsic_ports;
-static unsigned int no_ctrl_hsuart_ports;
 static unsigned int no_data_bam_ports;
 static unsigned int no_data_bam2bam_ports;
 static unsigned int no_data_hsic_ports;
-static unsigned int no_data_hsuart_ports;
 static struct rmnet_ports {
 	enum transport_type		data_xport;
 	enum transport_type		ctrl_xport;
@@ -165,8 +172,6 @@ static struct usb_gadget_strings *rmnet_strings[] = {
 	NULL,
 };
 
-static void frmnet_ctrl_response_available(struct f_rmnet *dev);
-
 /* ------- misc functions --------------------*/
 
 static inline struct f_rmnet *func_to_rmnet(struct usb_function *f)
@@ -236,14 +241,13 @@ static int rmnet_gport_setup(void)
 	int	ret;
 	int	port_idx;
 	int	i;
-	u8 base;
 
-	pr_debug("%s: bam ports: %u bam2bam ports: %u data hsic ports: %u data hsuart ports: %u"
-		" smd ports: %u ctrl hsic ports: %u ctrl hsuart ports: %u"
+	pr_debug("%s: bam ports: %u bam2bam ports: %u data hsic ports: %u"
+		" smd ports: %u ctrl hsic ports: %u"
 	" nr_rmnet_ports: %u\n",
 		__func__, no_data_bam_ports, no_data_bam2bam_ports,
-		no_data_hsic_ports, no_data_hsuart_ports, no_ctrl_smd_ports,
-		no_ctrl_hsic_ports, no_ctrl_hsuart_ports, nr_rmnet_ports);
+		no_data_hsic_ports, no_ctrl_smd_ports,
+		no_ctrl_hsic_ports, nr_rmnet_ports);
 
 	if (no_data_bam_ports || no_data_bam2bam_ports) {
 		ret = gbam_setup(no_data_bam_ports,
@@ -253,13 +257,9 @@ static int rmnet_gport_setup(void)
 	}
 
 	if (no_ctrl_smd_ports) {
-		ret = gsmd_ctrl_setup(FRMNET_CTRL_CLIENT,
-				no_ctrl_smd_ports, &base);
+		ret = gsmd_ctrl_setup(no_ctrl_smd_ports);
 		if (ret)
 			return ret;
-		for (i = 0; i < nr_rmnet_ports; i++)
-			if (rmnet_ports[i].port)
-				rmnet_ports[i].port->port_num += base;
 	}
 
 	if (no_data_hsic_ports) {
@@ -284,34 +284,6 @@ static int rmnet_gport_setup(void)
 		for (i = 0; i < nr_rmnet_ports; i++) {
 			if (rmnet_ports[i].ctrl_xport ==
 					USB_GADGET_XPORT_HSIC) {
-				rmnet_ports[i].ctrl_xport_num = port_idx;
-				port_idx++;
-			}
-		}
-	}
-
-	if (no_data_hsuart_ports) {
-		port_idx = ghsuart_data_setup(no_data_hsuart_ports,
-				USB_GADGET_RMNET);
-		if (port_idx < 0)
-			return port_idx;
-		for (i = 0; i < nr_rmnet_ports; i++) {
-			if (rmnet_ports[i].data_xport ==
-					USB_GADGET_XPORT_HSUART) {
-				rmnet_ports[i].data_xport_num = port_idx;
-				port_idx++;
-			}
-		}
-	}
-
-	if (no_ctrl_hsuart_ports) {
-		port_idx = ghsuart_ctrl_setup(no_ctrl_hsuart_ports,
-				USB_GADGET_RMNET);
-		if (port_idx < 0)
-			return port_idx;
-		for (i = 0; i < nr_rmnet_ports; i++) {
-			if (rmnet_ports[i].ctrl_xport ==
-					USB_GADGET_XPORT_HSUART) {
 				rmnet_ports[i].ctrl_xport_num = port_idx;
 				port_idx++;
 			}
@@ -350,14 +322,6 @@ static int gport_rmnet_connect(struct f_rmnet *dev)
 			return ret;
 		}
 		break;
-	case USB_GADGET_XPORT_HSUART:
-		ret = ghsuart_ctrl_connect(&dev->port, port_num);
-		if (ret) {
-			pr_err("%s: ghsuart_ctrl_connect failed: err:%d\n",
-					__func__, ret);
-			return ret;
-		}
-		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
 	default:
@@ -370,9 +334,10 @@ static int gport_rmnet_connect(struct f_rmnet *dev)
 	switch (dxport) {
 	case USB_GADGET_XPORT_BAM:
 	case USB_GADGET_XPORT_BAM2BAM:
-	case USB_GADGET_XPORT_BAM2BAM_IPA:
+		/* currently only one connection (idx 0)
+		   is supported */
 		ret = gbam_connect(&dev->port, port_num,
-						   dxport, port_num);
+						   dxport, 0);
 		if (ret) {
 			pr_err("%s: gbam_connect failed: err:%d\n",
 					__func__, ret);
@@ -386,15 +351,6 @@ static int gport_rmnet_connect(struct f_rmnet *dev)
 			pr_err("%s: ghsic_data_connect failed: err:%d\n",
 					__func__, ret);
 			ghsic_ctrl_disconnect(&dev->port, port_num);
-			return ret;
-		}
-		break;
-	case USB_GADGET_XPORT_HSUART:
-		ret = ghsuart_data_connect(&dev->port, port_num);
-		if (ret) {
-			pr_err("%s: ghsuart_data_connect failed: err:%d\n",
-					__func__, ret);
-			ghsuart_ctrl_disconnect(&dev->port, port_num);
 			return ret;
 		}
 		break;
@@ -427,9 +383,6 @@ static int gport_rmnet_disconnect(struct f_rmnet *dev)
 	case USB_GADGET_XPORT_HSIC:
 		ghsic_ctrl_disconnect(&dev->port, port_num);
 		break;
-	case USB_GADGET_XPORT_HSUART:
-		ghsuart_ctrl_disconnect(&dev->port, port_num);
-		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
 	default:
@@ -442,14 +395,10 @@ static int gport_rmnet_disconnect(struct f_rmnet *dev)
 	switch (dxport) {
 	case USB_GADGET_XPORT_BAM:
 	case USB_GADGET_XPORT_BAM2BAM:
-	case USB_GADGET_XPORT_BAM2BAM_IPA:
 		gbam_disconnect(&dev->port, port_num, dxport);
 		break;
 	case USB_GADGET_XPORT_HSIC:
 		ghsic_data_disconnect(&dev->port, port_num);
-		break;
-	case USB_GADGET_XPORT_HSUART:
-		ghsuart_data_disconnect(&dev->port, port_num);
 		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
@@ -477,12 +426,17 @@ static void frmnet_unbind(struct usb_configuration *c, struct usb_function *f)
 	kfree(f->name);
 }
 
-static void frmnet_purge_responses(struct f_rmnet *dev)
+static void frmnet_disable(struct usb_function *f)
 {
+	struct f_rmnet *dev = func_to_rmnet(f);
 	unsigned long flags;
 	struct rmnet_ctrl_pkt *cpkt;
 
 	pr_debug("%s: port#%d\n", __func__, dev->port_num);
+
+	usb_ep_disable(dev->notify);
+
+	atomic_set(&dev->online, 0);
 
 	spin_lock_irqsave(&dev->lock, flags);
 	while (!list_empty(&dev->cpkt_resp_q)) {
@@ -494,78 +448,6 @@ static void frmnet_purge_responses(struct f_rmnet *dev)
 	}
 	atomic_set(&dev->notify_count, 0);
 	spin_unlock_irqrestore(&dev->lock, flags);
-}
-
-static void frmnet_suspend(struct usb_function *f)
-{
-	struct f_rmnet *dev = func_to_rmnet(f);
-	unsigned		port_num;
-	enum transport_type	dxport = rmnet_ports[dev->port_num].data_xport;
-
-	pr_debug("%s: data xport: %s dev: %p portno: %d\n",
-		__func__, xport_to_str(dxport),
-		dev, dev->port_num);
-
-	frmnet_purge_responses(dev);
-
-	port_num = rmnet_ports[dev->port_num].data_xport_num;
-	switch (dxport) {
-	case USB_GADGET_XPORT_BAM:
-		break;
-	case USB_GADGET_XPORT_BAM2BAM:
-	case USB_GADGET_XPORT_BAM2BAM_IPA:
-		gbam_suspend(&dev->port, port_num, dxport);
-		break;
-	case USB_GADGET_XPORT_HSIC:
-		break;
-	case USB_GADGET_XPORT_NONE:
-		break;
-	default:
-		pr_err("%s: Un-supported transport: %s\n", __func__,
-				xport_to_str(dxport));
-	}
-}
-
-static void frmnet_resume(struct usb_function *f)
-{
-	struct f_rmnet *dev = func_to_rmnet(f);
-	unsigned		port_num;
-	enum transport_type	dxport = rmnet_ports[dev->port_num].data_xport;
-
-	pr_debug("%s: data xport: %s dev: %p portno: %d\n",
-		__func__, xport_to_str(dxport),
-		dev, dev->port_num);
-
-	port_num = rmnet_ports[dev->port_num].data_xport_num;
-	switch (dxport) {
-	case USB_GADGET_XPORT_BAM:
-		break;
-	case USB_GADGET_XPORT_BAM2BAM:
-	case USB_GADGET_XPORT_BAM2BAM_IPA:
-		gbam_resume(&dev->port, port_num, dxport);
-		break;
-	case USB_GADGET_XPORT_HSIC:
-		break;
-	case USB_GADGET_XPORT_NONE:
-		break;
-	default:
-		pr_err("%s: Un-supported transport: %s\n", __func__,
-				xport_to_str(dxport));
-	}
-}
-
-static void frmnet_disable(struct usb_function *f)
-{
-	struct f_rmnet *dev = func_to_rmnet(f);
-
-	pr_debug("%s: port#%d\n", __func__, dev->port_num);
-
-	usb_ep_disable(dev->notify);
-	dev->notify->driver_data = NULL;
-
-	atomic_set(&dev->online, 0);
-
-	frmnet_purge_responses(dev);
 
 	gport_rmnet_disconnect(dev);
 }
@@ -576,7 +458,6 @@ frmnet_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	struct f_rmnet			*dev = func_to_rmnet(f);
 	struct usb_composite_dev	*cdev = dev->cdev;
 	int				ret;
-	struct list_head *cpkt;
 
 	pr_debug("%s:dev:%p port#%d\n", __func__, dev, dev->port_num);
 
@@ -584,16 +465,10 @@ frmnet_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 		pr_debug("%s: reset port:%d\n", __func__, dev->port_num);
 		usb_ep_disable(dev->notify);
 	}
-
-	ret = config_ep_by_speed(cdev->gadget, f, dev->notify);
-	if (ret) {
-		dev->notify->desc = NULL;
-		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
-					dev->notify->name, ret);
-		return ret;
-	}
-	ret = usb_ep_enable(dev->notify);
-
+	dev->notify_desc = ep_choose(cdev->gadget,
+				dev->hs.notify,
+				dev->fs.notify);
+	ret = usb_ep_enable(dev->notify, dev->notify_desc);
 	if (ret) {
 		pr_err("%s: usb ep#%s enable failed, err#%d\n",
 				__func__, dev->notify->name, ret);
@@ -601,22 +476,19 @@ frmnet_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	}
 	dev->notify->driver_data = dev;
 
-	if (!dev->port.in->desc || !dev->port.out->desc) {
-		if (config_ep_by_speed(cdev->gadget, f, dev->port.in) ||
-			config_ep_by_speed(cdev->gadget, f, dev->port.out)) {
-				dev->port.in->desc = NULL;
-				dev->port.out->desc = NULL;
-				return -EINVAL;
-		}
-		ret = gport_rmnet_connect(dev);
+	if (dev->port.in->driver_data) {
+		pr_debug("%s: reset port:%d\n", __func__, dev->port_num);
+		gport_rmnet_disconnect(dev);
 	}
 
-	atomic_set(&dev->online, 1);
+	dev->port.in_desc = ep_choose(cdev->gadget,
+			dev->hs.in, dev->fs.in);
+	dev->port.out_desc = ep_choose(cdev->gadget,
+			dev->hs.out, dev->fs.out);
 
-	/* In case notifications were aborted, but there are pending control
-	   packets in the response queue, re-add the notifications */
-	list_for_each(cpkt, &dev->cpkt_resp_q)
-		frmnet_ctrl_response_available(dev);
+	ret = gport_rmnet_connect(dev);
+
+	atomic_set(&dev->online, 1);
 
 	return ret;
 }
@@ -627,7 +499,6 @@ static void frmnet_ctrl_response_available(struct f_rmnet *dev)
 	struct usb_cdc_notification	*event;
 	unsigned long			flags;
 	int				ret;
-	struct rmnet_ctrl_pkt	*cpkt;
 
 	pr_debug("%s:dev:%p portno#%d\n", __func__, dev, dev->port_num);
 
@@ -653,15 +524,7 @@ static void frmnet_ctrl_response_available(struct f_rmnet *dev)
 
 	ret = usb_ep_queue(dev->notify, dev->notify_req, GFP_ATOMIC);
 	if (ret) {
-		spin_lock_irqsave(&dev->lock, flags);
-		if (!list_empty(&dev->cpkt_resp_q)) {
-			atomic_dec(&dev->notify_count);
-			cpkt = list_first_entry(&dev->cpkt_resp_q,
-					struct rmnet_ctrl_pkt, list);
-			list_del(&cpkt->list);
-			rmnet_free_ctrl_pkt(cpkt);
-		}
-		spin_unlock_irqrestore(&dev->lock, flags);
+		atomic_dec(&dev->notify_count);
 		pr_debug("ep enqueue error %d\n", ret);
 	}
 }
@@ -683,8 +546,10 @@ static void frmnet_connect(struct grmnet *gr)
 static void frmnet_disconnect(struct grmnet *gr)
 {
 	struct f_rmnet			*dev;
+	unsigned long			flags;
 	struct usb_cdc_notification	*event;
 	int				status;
+	struct rmnet_ctrl_pkt		*cpkt;
 
 	if (!gr) {
 		pr_err("%s: Invalid grmnet:%p\n", __func__, gr);
@@ -718,7 +583,17 @@ static void frmnet_disconnect(struct grmnet *gr)
 				__func__, status);
 	}
 
-	frmnet_purge_responses(dev);
+	spin_lock_irqsave(&dev->lock, flags);
+	while (!list_empty(&dev->cpkt_resp_q)) {
+		cpkt = list_first_entry(&dev->cpkt_resp_q,
+				struct rmnet_ctrl_pkt, list);
+
+		list_del(&cpkt->list);
+		rmnet_free_ctrl_pkt(cpkt);
+	}
+	atomic_set(&dev->notify_count, 0);
+	spin_unlock_irqrestore(&dev->lock, flags);
+
 }
 
 static int
@@ -785,8 +660,6 @@ static void frmnet_notify_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_rmnet *dev = req->context;
 	int status = req->status;
-	unsigned long		flags;
-	struct rmnet_ctrl_pkt	*cpkt;
 
 	pr_debug("%s: dev:%p port#%d\n", __func__, dev, dev->port_num);
 
@@ -808,15 +681,7 @@ static void frmnet_notify_complete(struct usb_ep *ep, struct usb_request *req)
 
 		status = usb_ep_queue(dev->notify, req, GFP_ATOMIC);
 		if (status) {
-			spin_lock_irqsave(&dev->lock, flags);
-			if (!list_empty(&dev->cpkt_resp_q)) {
-				atomic_dec(&dev->notify_count);
-				cpkt = list_first_entry(&dev->cpkt_resp_q,
-						struct rmnet_ctrl_pkt, list);
-				list_del(&cpkt->list);
-				rmnet_free_ctrl_pkt(cpkt);
-			}
-			spin_unlock_irqrestore(&dev->lock, flags);
+			atomic_dec(&dev->notify_count);
 			pr_debug("ep enqueue error %d\n", status);
 		}
 		break;
@@ -973,6 +838,16 @@ static int frmnet_bind(struct usb_configuration *c, struct usb_function *f)
 	if (!f->descriptors)
 		goto fail;
 
+	dev->fs.in = usb_find_endpoint(rmnet_fs_function,
+					f->descriptors,
+					&rmnet_fs_in_desc);
+	dev->fs.out = usb_find_endpoint(rmnet_fs_function,
+					f->descriptors,
+					&rmnet_fs_out_desc);
+	dev->fs.notify = usb_find_endpoint(rmnet_fs_function,
+					f->descriptors,
+					&rmnet_fs_notify_desc);
+
 	if (gadget_is_dualspeed(cdev->gadget)) {
 		rmnet_hs_in_desc.bEndpointAddress =
 				rmnet_fs_in_desc.bEndpointAddress;
@@ -986,6 +861,13 @@ static int frmnet_bind(struct usb_configuration *c, struct usb_function *f)
 
 		if (!f->hs_descriptors)
 			goto fail;
+
+		dev->hs.in = usb_find_endpoint(rmnet_hs_function,
+				f->hs_descriptors, &rmnet_hs_in_desc);
+		dev->hs.out = usb_find_endpoint(rmnet_hs_function,
+				f->hs_descriptors, &rmnet_hs_out_desc);
+		dev->hs.notify = usb_find_endpoint(rmnet_hs_function,
+				f->hs_descriptors, &rmnet_hs_notify_desc);
 	}
 
 	pr_info("%s: RmNet(%d) %s Speed, IN:%s OUT:%s\n",
@@ -1054,8 +936,6 @@ static int frmnet_bind_config(struct usb_configuration *c, unsigned portno)
 	f->disable = frmnet_disable;
 	f->set_alt = frmnet_set_alt;
 	f->setup = frmnet_setup;
-	f->suspend = frmnet_suspend;
-	f->resume = frmnet_resume;
 	dev->port.send_cpkt_response = frmnet_send_cpkt_response;
 	dev->port.disconnect = frmnet_disconnect;
 	dev->port.connect = frmnet_connect;
@@ -1086,8 +966,6 @@ static void frmnet_cleanup(void)
 	no_data_bam2bam_ports = 0;
 	no_ctrl_hsic_ports = 0;
 	no_data_hsic_ports = 0;
-	no_ctrl_hsuart_ports = 0;
-	no_data_hsuart_ports = 0;
 }
 
 static int frmnet_init_port(const char *ctrl_name, const char *data_name)
@@ -1131,10 +1009,6 @@ static int frmnet_init_port(const char *ctrl_name, const char *data_name)
 		rmnet_port->ctrl_xport_num = no_ctrl_hsic_ports;
 		no_ctrl_hsic_ports++;
 		break;
-	case USB_GADGET_XPORT_HSUART:
-		rmnet_port->ctrl_xport_num = no_ctrl_hsuart_ports;
-		no_ctrl_hsuart_ports++;
-		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
 	default:
@@ -1150,17 +1024,12 @@ static int frmnet_init_port(const char *ctrl_name, const char *data_name)
 		no_data_bam_ports++;
 		break;
 	case USB_GADGET_XPORT_BAM2BAM:
-	case USB_GADGET_XPORT_BAM2BAM_IPA:
 		rmnet_port->data_xport_num = no_data_bam2bam_ports;
 		no_data_bam2bam_ports++;
 		break;
 	case USB_GADGET_XPORT_HSIC:
 		rmnet_port->data_xport_num = no_data_hsic_ports;
 		no_data_hsic_ports++;
-		break;
-	case USB_GADGET_XPORT_HSUART:
-		rmnet_port->data_xport_num = no_data_hsuart_ports;
-		no_data_hsuart_ports++;
 		break;
 	case USB_GADGET_XPORT_NONE:
 		break;
@@ -1183,8 +1052,6 @@ fail_probe:
 	no_data_bam_ports = 0;
 	no_ctrl_hsic_ports = 0;
 	no_data_hsic_ports = 0;
-	no_ctrl_hsuart_ports = 0;
-	no_data_hsuart_ports = 0;
 
 	return ret;
 }

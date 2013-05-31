@@ -185,19 +185,25 @@ static struct tty_buffer *tty_buffer_find(struct tty_struct *tty, size_t size)
 	/* Should possibly check if this fails for the largest buffer we
 	   have queued and recycle that ? */
 }
+
 /**
- *	__tty_buffer_request_room		-	grow tty buffer if needed
+ *	tty_buffer_request_room		-	grow tty buffer if needed
  *	@tty: tty structure
  *	@size: size desired
  *
  *	Make at least size bytes of linear space available for the tty
  *	buffer. If we fail return the size we managed to find.
- *      Locking: Caller must hold tty->buf.lock
+ *
+ *	Locking: Takes tty->buf.lock
  */
-static int __tty_buffer_request_room(struct tty_struct *tty, size_t size)
+int tty_buffer_request_room(struct tty_struct *tty, size_t size)
 {
 	struct tty_buffer *b, *n;
 	int left;
+	unsigned long flags;
+
+	spin_lock_irqsave(&tty->buf.lock, flags);
+
 	/* OPTIMISATION: We could keep a per tty "zero" sized buffer to
 	   remove this conditional if its worth it. This would be invisible
 	   to the callers */
@@ -219,29 +225,8 @@ static int __tty_buffer_request_room(struct tty_struct *tty, size_t size)
 			size = left;
 	}
 
-	return size;
-}
-
-
-/**
- *	tty_buffer_request_room		-	grow tty buffer if needed
- *	@tty: tty structure
- *	@size: size desired
- *
- *	Make at least size bytes of linear space available for the tty
- *	buffer. If we fail return the size we managed to find.
- *
- *	Locking: Takes tty->buf.lock
- */
-int tty_buffer_request_room(struct tty_struct *tty, size_t size)
-{
-	unsigned long flags;
-	int length;
-
-	spin_lock_irqsave(&tty->buf.lock, flags);
-	length = __tty_buffer_request_room(tty, size);
 	spin_unlock_irqrestore(&tty->buf.lock, flags);
-	return length;
+	return size;
 }
 EXPORT_SYMBOL_GPL(tty_buffer_request_room);
 
@@ -264,22 +249,14 @@ int tty_insert_flip_string_fixed_flag(struct tty_struct *tty,
 	int copied = 0;
 	do {
 		int goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE);
-		int space;
-		unsigned long flags;
-		struct tty_buffer *tb;
-
-		spin_lock_irqsave(&tty->buf.lock, flags);
-		space = __tty_buffer_request_room(tty, goal);
-		tb = tty->buf.tail;
+		int space = tty_buffer_request_room(tty, goal);
+		struct tty_buffer *tb = tty->buf.tail;
 		/* If there is no space then tb may be NULL */
-		if (unlikely(space == 0)) {
-			spin_unlock_irqrestore(&tty->buf.lock, flags);
+		if (unlikely(space == 0))
 			break;
-		}
 		memcpy(tb->char_buf_ptr + tb->used, chars, space);
 		memset(tb->flag_buf_ptr + tb->used, flag, space);
 		tb->used += space;
-		spin_unlock_irqrestore(&tty->buf.lock, flags);
 		copied += space;
 		chars += space;
 		/* There is a small chance that we need to split the data over
@@ -309,22 +286,14 @@ int tty_insert_flip_string_flags(struct tty_struct *tty,
 	int copied = 0;
 	do {
 		int goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE);
-		int space;
-		unsigned long __flags;
-		struct tty_buffer *tb;
-
-		spin_lock_irqsave(&tty->buf.lock, __flags);
-		space = __tty_buffer_request_room(tty, goal);
-		tb = tty->buf.tail;
+		int space = tty_buffer_request_room(tty, goal);
+		struct tty_buffer *tb = tty->buf.tail;
 		/* If there is no space then tb may be NULL */
-		if (unlikely(space == 0)) {
-			spin_unlock_irqrestore(&tty->buf.lock, __flags);
+		if (unlikely(space == 0))
 			break;
-		}
 		memcpy(tb->char_buf_ptr + tb->used, chars, space);
 		memcpy(tb->flag_buf_ptr + tb->used, flags, space);
 		tb->used += space;
-		spin_unlock_irqrestore(&tty->buf.lock, __flags);
 		copied += space;
 		chars += space;
 		flags += space;
@@ -375,20 +344,13 @@ EXPORT_SYMBOL(tty_schedule_flip);
 int tty_prepare_flip_string(struct tty_struct *tty, unsigned char **chars,
 								size_t size)
 {
-	int space;
-	unsigned long flags;
-	struct tty_buffer *tb;
-
-	spin_lock_irqsave(&tty->buf.lock, flags);
-	space = __tty_buffer_request_room(tty, size);
-
-	tb = tty->buf.tail;
+	int space = tty_buffer_request_room(tty, size);
 	if (likely(space)) {
+		struct tty_buffer *tb = tty->buf.tail;
 		*chars = tb->char_buf_ptr + tb->used;
 		memset(tb->flag_buf_ptr + tb->used, TTY_NORMAL, space);
 		tb->used += space;
 	}
-	spin_unlock_irqrestore(&tty->buf.lock, flags);
 	return space;
 }
 EXPORT_SYMBOL_GPL(tty_prepare_flip_string);
@@ -412,20 +374,13 @@ EXPORT_SYMBOL_GPL(tty_prepare_flip_string);
 int tty_prepare_flip_string_flags(struct tty_struct *tty,
 			unsigned char **chars, char **flags, size_t size)
 {
-	int space;
-	unsigned long __flags;
-	struct tty_buffer *tb;
-
-	spin_lock_irqsave(&tty->buf.lock, __flags);
-	space = __tty_buffer_request_room(tty, size);
-
-	tb = tty->buf.tail;
+	int space = tty_buffer_request_room(tty, size);
 	if (likely(space)) {
+		struct tty_buffer *tb = tty->buf.tail;
 		*chars = tb->char_buf_ptr + tb->used;
 		*flags = tb->flag_buf_ptr + tb->used;
 		tb->used += space;
 	}
-	spin_unlock_irqrestore(&tty->buf.lock, __flags);
 	return space;
 }
 EXPORT_SYMBOL_GPL(tty_prepare_flip_string_flags);
@@ -463,8 +418,6 @@ static void flush_to_ldisc(struct work_struct *work)
 			int count;
 			char *char_buf;
 			unsigned char *flag_buf;
-			unsigned int left = 0;
-			unsigned int max_space;
 
 			count = head->commit - head->read;
 			if (!count) {
@@ -479,33 +432,10 @@ static void flush_to_ldisc(struct work_struct *work)
 			   line discipline as we want to empty the queue */
 			if (test_bit(TTY_FLUSHPENDING, &tty->flags))
 				break;
-
-			/* update receive room */
-			spin_lock(&tty->read_lock);
-			if (tty->update_room_in_ldisc) {
-				if ((tty->read_cnt == N_TTY_BUF_SIZE - 1) &&
-					(tty->receive_room ==
-						N_TTY_BUF_SIZE - 1))
-					tty->rr_bug++;
-				left = N_TTY_BUF_SIZE - tty->read_cnt - 1;
-			}
-			spin_unlock(&tty->read_lock);
-
 			if (!tty->receive_room)
 				break;
-
-			if (tty->update_room_in_ldisc && !left) {
-				schedule_work(&tty->buf.work);
-				break;
-			}
-
-			if (tty->update_room_in_ldisc)
-				max_space = min(left, tty->receive_room);
-			else
-				max_space = tty->receive_room;
-
-			if (count > max_space)
-				count = max_space;
+			if (count > tty->receive_room)
+				count = tty->receive_room;
 			char_buf = head->char_buf_ptr + head->read;
 			flag_buf = head->flag_buf_ptr + head->read;
 			head->read += count;

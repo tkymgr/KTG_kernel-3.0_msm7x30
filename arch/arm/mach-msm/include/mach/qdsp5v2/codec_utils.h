@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -41,7 +41,6 @@ struct buffer {
 	unsigned used;		/* Input usage actual DSP produced PCM size  */
 	unsigned addr;
 };
-struct audio;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 struct audio_suspend_ctl {
@@ -132,8 +131,6 @@ struct audio {
 
 	unsigned int minor_no;
 	struct codec_operations codec_ops;
-	uint32_t buffer_size;
-	uint32_t buffer_count;
 };
 
 #endif /* !CODEC_UTILS_H */

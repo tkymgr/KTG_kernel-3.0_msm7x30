@@ -59,12 +59,8 @@
 #define INT_FM_TX 0x3005		/* index = 29 */
 #define RT_PROXY_PORT_001_RX	0x2000    /* index = 30 */
 #define RT_PROXY_PORT_001_TX	0x2001    /* index = 31 */
-#define SECONDARY_PCM_RX 12			/* index = 32 */
-#define SECONDARY_PCM_TX 13			/* index = 33 */
-
 
 #define AFE_PORT_INVALID 0xFFFF
-#define SLIMBUS_EXTPROC_RX AFE_PORT_INVALID
 
 #define AFE_PORT_CMD_START 0x000100ca
 
@@ -157,55 +153,6 @@ struct afe_get_active_handles_command {
 	u16 reserved;
 } __attribute__ ((packed));
 
-/*
- * Opcode for AFE to start DTMF.
- */
-#define AFE_PORTS_CMD_DTMF_CTL	0x00010102
-
-/** DTMF payload.*/
-struct afe_dtmf_generation_command {
-	struct apr_hdr hdr;
-
-	/*
-	 * Duration of the DTMF tone in ms.
-	 * -1      -> continuous,
-	 *  0      -> disable
-	 */
-	int64_t                   duration_in_ms;
-
-	/*
-	 * The DTMF high tone frequency.
-	 */
-	uint16_t                  high_freq;
-
-	/*
-	 * The DTMF low tone frequency.
-	 */
-	uint16_t                  low_freq;
-
-	/*
-	 * The DTMF volume setting
-	 */
-	uint16_t                  gain;
-
-	/*
-	 * The number of ports to enable/disable on.
-	 */
-	uint16_t                  num_ports;
-
-	/*
-	 * The Destination ports - array  .
-	 * For DTMF on multiple ports, portIds needs to
-	 * be populated numPorts times.
-	 */
-	uint16_t                  port_ids;
-
-	/*
-	 * variable for 32 bit alignment of APR packet.
-	 */
-	uint16_t                  reserved;
-} __packed;
-
 #define AFE_PCM_CFG_MODE_PCM			0x0
 #define AFE_PCM_CFG_MODE_AUX			0x1
 #define AFE_PCM_CFG_SYNC_EXT			0x0
@@ -277,8 +224,7 @@ struct afe_port_mi2s_cfg {
 				/* i2s stereo = 3 */
 	u16	ws;		/* 0, word select signal from external source */
 				/* 1, word select signal from internal source */
-	u16	format;	/* don't touch this field if it is not for */
-				/* AFE_PORT_CMD_I2S_CONFIG opcode */
+	u16	reserved;
 } __attribute__ ((packed));
 
 struct afe_port_hdmi_cfg {
@@ -326,16 +272,6 @@ struct afe_port_slimbus_cfg {
 	u16	reserved;
 } __packed;
 
-struct afe_port_slimbus_sch_cfg {
-	u16	slimbus_dev_id;		/* SLIMBUS Device id.*/
-	u16	bit_width;		/**  bit width of the samples, 16, 24.*/
-	u16	data_format;		/** data format.*/
-	u16	num_channels;		/** Number of channels.*/
-	u16	reserved;
-	/** Slave channel  mapping for respective channels.*/
-	u8	slave_ch_mapping[8];
-} __packed;
-
 struct afe_port_rtproxy_cfg {
 	u16	bitwidth;	/* 16,24,32 */
 	u16	interleaved;    /* interleaved = 1 */
@@ -348,19 +284,16 @@ struct afe_port_rtproxy_cfg {
 	int	num_ch;		/* 1 to 8 */
 } __packed;
 
-#define AFE_PORT_AUDIO_IF_CONFIG 0x000100d3
-#define AFE_PORT_AUDIO_SLIM_SCH_CONFIG 0x000100e4
+#define AFE_PORT_AUDIO_IF_CONFIG			0x000100d3
 #define AFE_PORT_MULTI_CHAN_HDMI_AUDIO_IF_CONFIG	0x000100D9
-#define AFE_PORT_CMD_I2S_CONFIG	0x000100E7
 
 union afe_port_config {
-	struct afe_port_pcm_cfg           pcm;
-	struct afe_port_mi2s_cfg          mi2s;
-	struct afe_port_hdmi_cfg          hdmi;
-	struct afe_port_hdmi_multi_ch_cfg hdmi_multi_ch;
-	struct afe_port_slimbus_cfg	  slimbus;
-	struct afe_port_slimbus_sch_cfg	  slim_sch;
-	struct afe_port_rtproxy_cfg       rtproxy;
+	struct afe_port_pcm_cfg			pcm;
+	struct afe_port_mi2s_cfg		mi2s;
+	struct afe_port_hdmi_cfg		hdmi;
+	struct afe_port_hdmi_multi_ch_cfg	hdmi_multi_ch;
+	struct afe_port_slimbus_cfg		slimbus;
+	struct afe_port_rtproxy_cfg		rtproxy;
 } __attribute__((packed));
 
 struct afe_audioif_config_command {
@@ -404,68 +337,18 @@ struct afe_param_loopback_gain {
 	u16 reserved;
 } __attribute__ ((packed));
 
-/* Parameter ID used to configure and enable/disable the loopback path. The
- * difference with respect to the existing API, AFE_PORT_CMD_LOOPBACK, is that
- * it allows Rx port to be configured as source port in loopback path. Port-id
- * in AFE_PORT_CMD_SET_PARAM cmd is the source port whcih can be Tx or Rx port.
- * In addition, we can configure the type of routing mode to handle different
- * use cases.
-*/
-enum {
-	/* Regular loopback from source to destination port */
-	LB_MODE_DEFAULT = 1,
-	/* Sidetone feed from Tx source to Rx destination port */
-	LB_MODE_SIDETONE,
-	/* Echo canceller reference, voice + audio + DTMF */
-	LB_MODE_EC_REF_VOICE_AUDIO,
-	/* Echo canceller reference, voice alone */
-	LB_MODE_EC_REF_VOICE
-};
-
-#define AFE_PARAM_ID_LOOPBACK_CONFIG 0x0001020B
-#define AFE_API_VERSION_LOOPBACK_CONFIG 0x1
-struct afe_param_loopback_cfg {
-	/* Minor version used for tracking the version of the configuration
-	 * interface.
-	 */
-	uint32_t loopback_cfg_minor_version;
-
-	/* Destination Port Id. */
-	uint16_t dst_port_id;
-
-	/* Specifies data path type from src to dest port. Supported values:
-	 * LB_MODE_DEFAULT
-	 * LB_MODE_SIDETONE
-	 * LB_MODE_EC_REF_VOICE_AUDIO
-	 * LB_MODE_EC_REF_VOICE
-	 */
-	uint16_t routing_mode;
-
-	/* Specifies whether to enable (1) or disable (0) an AFE loopback. */
-	uint16_t enable;
-
-	/* Reserved for 32-bit alignment. This field must be set to 0. */
-	uint16_t reserved;
-} __packed;
 
 #define AFE_MODULE_ID_PORT_INFO		0x00010200
-/* Module ID for the loopback-related parameters. */
-#define AFE_MODULE_LOOPBACK           0x00010205
-struct afe_param_payload_base {
+struct afe_param_payload {
 	u32 module_id;
 	u32 param_id;
 	u16 param_size;
 	u16 reserved;
-} __packed;
-
-struct afe_param_payload {
-	struct afe_param_payload_base base;
 	union {
 		struct afe_param_sidetone_gain sidetone_gain;
 		struct afe_param_sampling_rate sampling_rate;
 		struct afe_param_channels      channels;
 		struct afe_param_loopback_gain loopback_gain;
-		struct afe_param_loopback_cfg loopback_cfg;
 	} __attribute__((packed)) param;
 } __attribute__ ((packed));
 
@@ -666,19 +549,6 @@ struct adm_cmd_memory_unmap_regions{
 #define VPM_TX_SM_ECNS_COPP_TOPOLOGY			0x00010F71
 #define VPM_TX_DM_FLUENCE_COPP_TOPOLOGY			0x00010F72
 #define VPM_TX_QMIC_FLUENCE_COPP_TOPOLOGY		0x00010F75
-
-/* SRS TRUMEDIA GUIDS */
-/* topology */
-#define SRS_TRUMEDIA_TOPOLOGY_ID			0x00010D90
-/* module */
-#define SRS_TRUMEDIA_MODULE_ID				0x10005010
-/* parameters */
-#define SRS_TRUMEDIA_PARAMS				0x10005011
-#define SRS_TRUMEDIA_PARAMS_WOWHD			0x10005012
-#define SRS_TRUMEDIA_PARAMS_CSHP			0x10005013
-#define SRS_TRUMEDIA_PARAMS_HPF				0x10005014
-#define SRS_TRUMEDIA_PARAMS_PEQ				0x10005015
-#define SRS_TRUMEDIA_PARAMS_HL				0x10005016
 
 #define ASM_MAX_EQ_BANDS 12
 
@@ -1136,7 +1006,6 @@ struct asm_encode_cfg_blk {
 		struct asm_qcelp13_read_cfg qcelp13;
 		struct asm_sbc_read_cfg     sbc;
 		struct asm_amrwb_read_cfg   amrwb;
-		struct asm_multi_channel_pcm_fmt_blk      mpcm;
 	} __attribute__((packed)) cfg;
 };
 
@@ -1178,10 +1047,6 @@ struct asm_stream_cmd_open_read {
 #define WMA_V9       0x00010BF4
 #define AMR_WB_PLUS  0x00010BF5
 #define AC3_DECODER  0x00010BF6
-#define EAC3_DECODER 0x00010C3C
-#define DTS	0x00010D88
-#define ATRAC	0x00010D89
-#define MAT	0x00010D8A
 #define G711_ALAW_FS 0x00010BF7
 #define G711_MLAW_FS 0x00010BF8
 #define G711_PCM_FS  0x00010BF9
@@ -1208,16 +1073,6 @@ struct asm_stream_cmd_open_write {
 	u32            format;
 } __attribute__((packed));
 
-#define IEC_61937_MASK	0x00000001
-#define IEC_60958_MASK	0x00000002
-
-#define ASM_STREAM_CMD_OPEN_WRITE_COMPRESSED	0x00010D84
-struct asm_stream_cmd_open_write_compressed {
-	struct apr_hdr hdr;
-	u32	flags;
-	u32	format;
-} __packed;
-
 #define ASM_STREAM_CMD_OPEN_READWRITE                    0x00010BCC
 
 struct asm_stream_cmd_open_read_write {
@@ -1227,15 +1082,6 @@ struct asm_stream_cmd_open_read_write {
 	u32                write_format;
 	u32                read_format;
 } __attribute__((packed));
-
-#define ADM_CMD_CONNECT_AFE_PORT 0x00010320
-
-struct adm_cmd_connect_afe_port {
-	struct apr_hdr     hdr;
-	u8	mode; /*mode represent the interface is for RX or TX*/
-	u8	session_id; /*ASM session ID*/
-	u16	afe_port_id;
-} __packed;
 
 #define ASM_STREAM_CMD_SET_ENCDEC_PARAM                  0x00010C10
 #define ASM_STREAM_CMD_GET_ENCDEC_PARAM                  0x00010C11
@@ -1495,97 +1341,5 @@ struct asm_svc_cmdrsp_get_wallclock_time{
 					intervention to complete. */
 #define ADSP_ENOTIMPL     0x00000011 /* Operation is not implemented. */
 #define ADSP_ENEEDMORE    0x00000012 /* Operation needs more data or resources*/
-
-/* SRS TRUMEDIA start */
-#define SRS_ID_GLOBAL	0x00000001
-#define SRS_ID_WOWHD	0x00000002
-#define SRS_ID_CSHP	0x00000003
-#define SRS_ID_HPF	0x00000004
-#define SRS_ID_PEQ	0x00000005
-#define SRS_ID_HL	0x00000006
-
-#define SRS_CMD_UPLOAD		0x7FFF0000
-#define SRS_PARAM_INDEX_MASK	0x80000000
-#define SRS_PARAM_OFFSET_MASK	0x3FFF0000
-#define SRS_PARAM_VALUE_MASK	0x0000FFFF
-
-struct srs_trumedia_params_GLOBAL {
-	uint8_t                  v1;
-	uint8_t                  v2;
-	uint8_t                  v3;
-	uint8_t                  v4;
-	uint8_t                  v5;
-	uint8_t                  v6;
-	uint8_t                  v7;
-	uint8_t                  v8;
-} __packed;
-
-struct srs_trumedia_params_WOWHD {
-	uint32_t				v1;
-	uint16_t				v2;
-	uint16_t				v3;
-	uint16_t				v4;
-	uint16_t				v5;
-	uint16_t				v6;
-	uint16_t				v7;
-	uint16_t				v8;
-	uint16_t				v____A1;
-	uint32_t				v9;
-	uint16_t				v10;
-	uint16_t				v11;
-	uint32_t				v12[16];
-} __packed;
-
-struct srs_trumedia_params_CSHP {
-	uint32_t				v1;
-	uint16_t				v2;
-	uint16_t				v3;
-	uint16_t				v4;
-	uint16_t				v5;
-	uint16_t				v6;
-	uint16_t				v____A1;
-	uint32_t				v7;
-	uint16_t				v8;
-	uint16_t				v9;
-	uint32_t				v10[16];
-} __packed;
-
-struct srs_trumedia_params_HPF {
-	uint32_t				v1;
-	uint32_t				v2[26];
-} __packed;
-
-struct srs_trumedia_params_PEQ {
-	uint32_t				v1;
-	uint16_t				v2;
-	uint16_t				v3;
-	uint16_t				v4;
-	uint16_t				v____A1;
-	uint32_t				v5[26];
-	uint32_t				v6[26];
-} __packed;
-
-struct srs_trumedia_params_HL {
-	uint16_t				v1;
-	uint16_t				v2;
-	uint16_t				v3;
-	uint16_t				v____A1;
-	int32_t					v4;
-	uint32_t				v5;
-	uint16_t				v6;
-	uint16_t				v____A2;
-	uint32_t				v7;
-} __packed;
-
-struct srs_trumedia_params {
-	struct srs_trumedia_params_GLOBAL	global;
-	struct srs_trumedia_params_WOWHD	wowhd;
-	struct srs_trumedia_params_CSHP		cshp;
-	struct srs_trumedia_params_HPF		hpf;
-	struct srs_trumedia_params_PEQ		peq;
-	struct srs_trumedia_params_HL		hl;
-} __packed;
-int srs_trumedia_open(int port_id, int srs_tech_id, void *srs_params);
-/* SRS TruMedia end */
 
 #endif /*_APR_AUDIO_H_*/

@@ -2,7 +2,6 @@
  * soc-dapm.c  --  ALSA SoC Dynamic Audio Power Management
  *
  * Copyright 2005 Wolfson Microelectronics PLC.
- * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * Author: Liam Girdwood <lrg@slimlogic.co.uk>
  *
@@ -60,6 +59,8 @@ static int dapm_up_seq[] = {
 	[snd_soc_dapm_pre] = 0,
 	[snd_soc_dapm_supply] = 1,
 	[snd_soc_dapm_micbias] = 2,
+	[snd_soc_dapm_aif_in] = 3,
+	[snd_soc_dapm_aif_out] = 3,
 	[snd_soc_dapm_adc] = 3,
 	[snd_soc_dapm_mic] = 4,
 	[snd_soc_dapm_mux] = 5,
@@ -69,8 +70,7 @@ static int dapm_up_seq[] = {
 	[snd_soc_dapm_mixer] = 7,
 	[snd_soc_dapm_mixer_named_ctl] = 7,
 	[snd_soc_dapm_pga] = 8,
-	[snd_soc_dapm_aif_in] = 8,
-	[snd_soc_dapm_aif_out] = 8,
+	[snd_soc_dapm_adc] = 9,
 	[snd_soc_dapm_out_drv] = 10,
 	[snd_soc_dapm_hp] = 10,
 	[snd_soc_dapm_spk] = 10,
@@ -79,8 +79,6 @@ static int dapm_up_seq[] = {
 
 static int dapm_down_seq[] = {
 	[snd_soc_dapm_pre] = 0,
-	[snd_soc_dapm_aif_in] = 1,
-	[snd_soc_dapm_aif_out] = 1,
 	[snd_soc_dapm_adc] = 1,
 	[snd_soc_dapm_hp] = 2,
 	[snd_soc_dapm_spk] = 2,
@@ -94,6 +92,8 @@ static int dapm_down_seq[] = {
 	[snd_soc_dapm_mux] = 9,
 	[snd_soc_dapm_virt_mux] = 9,
 	[snd_soc_dapm_value_mux] = 9,
+	[snd_soc_dapm_aif_in] = 10,
+	[snd_soc_dapm_aif_out] = 10,
 	[snd_soc_dapm_supply] = 11,
 	[snd_soc_dapm_post] = 12,
 };
@@ -1543,17 +1543,10 @@ static int dapm_power_widgets(struct snd_soc_dapm_context *dapm, int event)
 
 			trace_snd_soc_dapm_widget_power(w, power);
 
-			if (power) {
+			if (power)
 				dapm_seq_insert(w, &up_list, true);
-				dev_dbg(w->dapm->dev,
-					"%s(): power up . widget  %s\n",
-					__func__, w->name);
-			} else {
+			else
 				dapm_seq_insert(w, &down_list, false);
-				dev_dbg(w->dapm->dev,
-					"%s(): power down . widget  %s\n",
-					__func__, w->name);
-			}
 
 			w->power = power;
 			break;

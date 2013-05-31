@@ -114,7 +114,6 @@ struct msm_camera_sensor_pwr {
 #define MSM_CAMERA_FLASH_SRC_CURRENT_DRIVER	(0x00000001<<2)
 #define MSM_CAMERA_FLASH_SRC_EXT     (0x00000001<<3)
 #define MSM_CAMERA_FLASH_SRC_LED (0x00000001<<3)
-#define MSM_CAMERA_FLASH_SRC_LED1 (0x00000001<<4)
 
 struct msm_camera_sensor_flash_pmic {
 	uint8_t num_of_src;
@@ -140,15 +139,9 @@ struct msm_camera_sensor_flash_current_driver {
 	const struct pmic8058_leds_platform_data *driver_channel;
 };
 
-enum msm_camera_ext_led_flash_id {
-	MAM_CAMERA_EXT_LED_FLASH_SC628A,
-	MAM_CAMERA_EXT_LED_FLASH_TPS61310,
-};
-
 struct msm_camera_sensor_flash_external {
 	uint32_t led_en;
 	uint32_t led_flash_en;
-	enum msm_camera_ext_led_flash_id flash_id;
 	struct msm_cam_expander_info *expander_info;
 };
 
@@ -194,15 +187,9 @@ enum msm_camera_type {
 	BACK_CAMERA_INT_3D,
 };
 
-enum msm_sensor_type {
-	BAYER_SENSOR,
-	YUV_SENSOR,
-};
-
 enum camera_vreg_type {
 	REG_LDO,
 	REG_VS,
-	REG_GPIO,
 };
 
 struct camera_vreg_t {
@@ -352,19 +339,13 @@ enum msm_mdp_hw_revision {
 	MDP_REV_40,
 	MDP_REV_41,
 	MDP_REV_42,
-	MDP_REV_43,
-	MDP_REV_44,
 };
 
 struct msm_panel_common_pdata {
 	uintptr_t hw_revision_addr;
 	int gpio;
-	bool bl_lock;
-	spinlock_t bl_spinlock;
 	int (*backlight_level)(int level, int max, int min);
 	int (*pmic_backlight)(int level);
-	int (*rotate_panel)(void);
-	int (*backlight) (int level, int mode);
 	int (*panel_num)(void);
 	void (*panel_config_gpio)(int);
 	int (*vga_switch)(int select_vga);
@@ -380,7 +361,6 @@ struct msm_panel_common_pdata {
 	u32 ov1_wb_size;  /* overlay1 writeback size */
 	u32 mem_hid;
 	char cont_splash_enabled;
-	char mdp_iommu_split_domain;
 };
 
 
@@ -392,7 +372,6 @@ struct lcdc_platform_data {
 #ifdef CONFIG_MSM_BUS_SCALING
 	struct msm_bus_scale_pdata *bus_scale_table;
 #endif
-	int (*lvds_pixel_remap)(void);
 };
 
 struct tvenc_platform_data {
@@ -414,7 +393,6 @@ struct mipi_dsi_platform_data {
 	int (*dsi_power_save)(int on);
 	int (*dsi_client_reset)(void);
 	int (*get_lane_config)(void);
-	char (*splash_is_enabled)(void);
 	int target_type;
 };
 
@@ -437,17 +415,7 @@ struct mipi_dsi_panel_platform_data {
 	int fpga_3d_config_addr;
 	int *gpio;
 	struct mipi_dsi_phy_ctrl *phy_ctrl_settings;
-	char dlane_swap;
 	void (*dsi_pwm_cfg)(void);
-	char enable_wled_bl_ctrl;
-};
-
-struct lvds_panel_platform_data {
-	int *gpio;
-};
-
-struct msm_wfd_platform_data {
-	char (*wfd_check_mdp_iommu_split)(void);
 };
 
 #define PANEL_NAME_MAX_LEN 50
@@ -470,23 +438,6 @@ struct msm_hdmi_platform_data {
 	int (*gpio_config)(int on);
 	int (*init_irq)(void);
 	bool (*check_hdcp_hw_support)(void);
-	bool is_mhl_enabled;
-};
-
-struct msm_mhl_platform_data {
-	int irq;
-	/* GPIO no. for mhl intr */
-	uint32_t gpio_mhl_int;
-	/* GPIO no. for mhl block reset */
-	uint32_t gpio_mhl_reset;
-	/*
-	 * below gpios are specific to targets
-	 * that have the integrated MHL soln.
-	 */
-	/* GPIO no. for mhl block power */
-	uint32_t gpio_mhl_power;
-	/* GPIO no. for hdmi-mhl mux */
-	uint32_t gpio_hdmi_mhl_mux;
 };
 
 struct msm_i2c_platform_data {
@@ -500,7 +451,6 @@ struct msm_i2c_platform_data {
 	int aux_dat;
 	int src_clk_rate;
 	int use_gsbi_shared_mode;
-	int keep_ahb_clk_on;
 	void (*msm_i2c_config_gpio)(int iface, int config_type);
 };
 
@@ -522,12 +472,6 @@ struct msm_vidc_platform_data {
 	int disable_turbo;
 };
 
-struct vcap_platform_data {
-	unsigned *gpios;
-	int num_gpios;
-	struct msm_bus_scale_pdata *bus_client_pdata;
-};
-
 #if defined(CONFIG_USB_PEHCI_HCD) || defined(CONFIG_USB_PEHCI_HCD_MODULE)
 struct isp1763_platform_data {
 	unsigned reset_gpio;
@@ -541,7 +485,6 @@ void msm_copper_init(struct of_dev_auxdata **);
 #endif
 void msm_add_devices(void);
 void msm_copper_add_devices(void);
-void msm_copper_add_drivers(void);
 void msm_map_common_io(void);
 void msm_map_qsd8x50_io(void);
 void msm_map_msm8x60_io(void);
@@ -551,20 +494,16 @@ void msm_map_apq8064_io(void);
 void msm_map_msm7x30_io(void);
 void msm_map_fsm9xxx_io(void);
 void msm_map_copper_io(void);
-void msm_map_msm8625_io(void);
-void msm_map_msm9625_io(void);
 void msm_init_irq(void);
 void msm_copper_init_irq(void);
 void vic_handle_irq(struct pt_regs *regs);
 void msm_copper_reserve(void);
 void msm_copper_very_early(void);
-void msm_copper_init_gpiomux(void);
 
 struct mmc_platform_data;
 int msm_add_sdcc(unsigned int controller,
 		struct mmc_platform_data *plat);
 
-void msm_pm_register_irqs(void);
 struct msm_usb_host_platform_data;
 int msm_add_host(unsigned int host,
 		struct msm_usb_host_platform_data *plat);

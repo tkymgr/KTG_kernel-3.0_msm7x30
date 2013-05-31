@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+# Copyright (c) 2011, The Linux Foundation. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -40,12 +40,9 @@ import subprocess
 # force LANG to be set to en_US.UTF-8 to get consistent warnings.
 
 allowed_warnings = set([
-    "alignment.c:298",
     "alignment.c:720",
     "async.c:122",
     "async.c:270",
-    "block.c:885",
-    "block.c:886",
     "dir.c:43",
     "dm.c:1053",
     "dm.c:1080",
@@ -59,39 +56,13 @@ allowed_warnings = set([
     "inode.c:74",
     "msm_sdcc.c:126",
     "msm_sdcc.c:128",
-    "nf_conntrack_core.c:1579",
-    "nf_conntrack_core.c:1580",
     "nf_conntrack_netlink.c:790",
-    "nf_conntrack_proto.c:210",
-    "nf_conntrack_proto.c:345",
-    "nf_conntrack_proto.c:370",
-    "nf_nat_core.c:528",
-    "nf_nat_core.c:739",
-    "nf_nat_core.c:740",
-    "nf_nat_core.c:741",
-    "nf_nat_core.c:742",
-    "nf_nat_core.c:751",
-    "nf_nat_core.c:753",
-    "nf_nat_core.c:756",
-    "nf_nat_ftp.c:123",
-    "nf_nat_pptp.c:285",
-    "nf_nat_pptp.c:288",
-    "nf_nat_pptp.c:291",
-    "nf_nat_pptp.c:294",
-    "nf_nat_sip.c:550",
-    "nf_nat_sip.c:551",
-    "nf_nat_sip.c:552",
-    "nf_nat_sip.c:553",
-    "nf_nat_sip.c:555",
-    "nf_nat_sip.c:556",
-    "nf_nat_sip.c:554",
     "nf_nat_standalone.c:118",
-    "nf_nat_tftp.c:46",
     "return_address.c:62",
-    "sch_generic.c:678",
     "soc-core.c:1719",
     "xt_log.h:50",
     "vx6953.c:3124",
+    "tx.c:1804",
  ])
 
 # Capture the name of the object file, can find it.

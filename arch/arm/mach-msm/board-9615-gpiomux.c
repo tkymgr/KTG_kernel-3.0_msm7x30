@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,7 +37,7 @@ static struct gpiomux_setting gsbi4 = {
 
 static struct gpiomux_setting gsbi5 = {
 	.func = GPIOMUX_FUNC_1,
-	.drv = GPIOMUX_DRV_2MA,
+	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_NONE,
 };
 
@@ -77,55 +77,6 @@ static struct gpiomux_setting sdcc2_suspend_cfg = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
-};
-
-static struct gpiomux_setting cdc_mclk = {
-	.func = GPIOMUX_FUNC_1,
-	.drv = GPIOMUX_DRV_8MA,
-	.pull = GPIOMUX_PULL_NONE,
-};
-
-#ifdef CONFIG_FB_MSM_EBI2
-static struct gpiomux_setting ebi2_lcdc_a_d = {
-	.func = GPIOMUX_FUNC_2,
-	.drv = GPIOMUX_DRV_12MA,
-	.pull = GPIOMUX_PULL_DOWN,
-};
-
-static struct gpiomux_setting ebi2_lcdc_cs = {
-	.func = GPIOMUX_FUNC_2,
-	.drv = GPIOMUX_DRV_12MA,
-	.pull = GPIOMUX_PULL_UP,
-};
-
-static struct gpiomux_setting ebi2_lcdc_rs = {
-	.func = GPIOMUX_FUNC_3,
-	.drv = GPIOMUX_DRV_12MA,
-	.pull = GPIOMUX_PULL_DOWN,
-};
-#endif
-
-static struct gpiomux_setting wlan_active_config = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_OUT_LOW,
-};
-
-static struct gpiomux_setting wlan_suspend_config = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_IN,
-};
-
-static struct msm_gpiomux_config msm9615_audio_codec_configs[] __initdata = {
-	{
-		.gpio = 24,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &cdc_mclk,
-		},
-	},
 };
 
 static struct msm_gpiomux_config msm9615_sdcc2_configs[] __initdata = {
@@ -184,23 +135,6 @@ struct msm_gpiomux_config msm9615_ps_hold_config[] __initdata = {
 		.gpio = 83,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ps_hold,
-		},
-	},
-};
-
-static struct gpiomux_setting sd_card_det = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_IN,
-};
-
-struct msm_gpiomux_config sd_card_det_config[] __initdata = {
-	{
-		.gpio = 80,
-		.settings = {
-			[GPIOMUX_ACTIVE]    = &sd_card_det,
-			[GPIOMUX_SUSPENDED] = &sd_card_det,
 		},
 	},
 };
@@ -282,7 +216,6 @@ struct msm_gpiomux_config msm9615_gsbi_configs[] __initdata = {
 		.gpio      = 16,	/* GSBI5 I2C QUP SCL */
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gsbi5,
-			[GPIOMUX_ACTIVE] = &gsbi5,
 		},
 	},
 	{
@@ -315,40 +248,6 @@ static struct msm_gpiomux_config msm9615_slimbus_configs[] __initdata = {
 	},
 };
 
-#ifdef CONFIG_FB_MSM_EBI2
-static struct msm_gpiomux_config msm9615_ebi2_lcdc_configs[] __initdata = {
-	{
-		.gpio      = 21,	/* a_d */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ebi2_lcdc_a_d,
-		},
-	},
-	{
-		.gpio      = 22,	/* cs */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ebi2_lcdc_cs,
-		},
-	},
-	{
-		.gpio      = 24,	/* rs */
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ebi2_lcdc_rs,
-		},
-	},
-};
-#endif
-
-static struct msm_gpiomux_config msm9615_wlan_configs[] __initdata = {
-	{
-		.gpio      = 21,/* WLAN_RESET_N */
-		.settings = {
-			[GPIOMUX_ACTIVE] = &wlan_active_config,
-			[GPIOMUX_SUSPENDED] = &wlan_suspend_config,
-		},
-	},
-};
-
-
 int __init msm9615_init_gpiomux(void)
 {
 	int rc;
@@ -366,23 +265,11 @@ int __init msm9615_init_gpiomux(void)
 
 	msm_gpiomux_install(msm9615_ps_hold_config,
 			ARRAY_SIZE(msm9615_ps_hold_config));
-	msm_gpiomux_install(sd_card_det_config,
-			ARRAY_SIZE(sd_card_det_config));
 	msm_gpiomux_install(msm9615_sdcc2_configs,
 			ARRAY_SIZE(msm9615_sdcc2_configs));
 #ifdef CONFIG_LTC4088_CHARGER
 	msm_gpiomux_install(msm9615_ltc4088_charger_config,
 			ARRAY_SIZE(msm9615_ltc4088_charger_config));
-#endif
-	msm_gpiomux_install(msm9615_audio_codec_configs,
-			ARRAY_SIZE(msm9615_audio_codec_configs));
-
-	msm_gpiomux_install(msm9615_wlan_configs,
-			ARRAY_SIZE(msm9615_wlan_configs));
-
-#ifdef CONFIG_FB_MSM_EBI2
-	msm_gpiomux_install(msm9615_ebi2_lcdc_configs,
-			ARRAY_SIZE(msm9615_ebi2_lcdc_configs));
 #endif
 
 	return 0;

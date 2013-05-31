@@ -18,13 +18,10 @@
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/err.h>
-#include <linux/export.h>
 #include <mach/rpm.h>
 
 #include "rpm_resources.h"
-#include "qdss-priv.h"
-
-#define MAX_STR_LEN	(65535)
+#include "qdss.h"
 
 enum {
 	QDSS_CLK_OFF,
@@ -32,237 +29,47 @@ enum {
 	QDSS_CLK_ON_HSDBG,
 };
 
-/*
- * Exclusion rules for structure fields.
- *
- * S: qdss.sources_mutex protected.
- * I: qdss.sink_mutex protected.
- * C: qdss.clk_mutex protected.
- */
 struct qdss_ctx {
-	struct kobject			*modulekobj;
-	struct msm_qdss_platform_data	*pdata;
-	struct list_head		sources;	/* S: sources list */
-	struct mutex			sources_mutex;
-	uint8_t				sink_count;	/* I: sink count */
-	struct mutex			sink_mutex;
-	uint8_t				max_clk;
-	uint8_t				clk_count;	/* C: clk count */
-	struct mutex			clk_mutex;
+	struct kobject	*modulekobj;
+	uint8_t		max_clk;
 };
 
 static struct qdss_ctx qdss;
 
-/**
- * qdss_get - get the qdss source handle
- * @name: name of the qdss source
- *
- * Searches the sources list to get the qdss source handle for this source.
- *
- * CONTEXT:
- * Typically called from init or probe functions
- *
- * RETURNS:
- * pointer to struct qdss_source on success, %NULL on failure
- */
-struct qdss_source *qdss_get(const char *name)
+
+struct kobject *qdss_get_modulekobj(void)
 {
-	struct qdss_source *src, *source = NULL;
-
-	mutex_lock(&qdss.sources_mutex);
-	list_for_each_entry(src, &qdss.sources, link) {
-		if (src->name) {
-			if (strncmp(src->name, name, MAX_STR_LEN))
-				continue;
-			source = src;
-			break;
-		}
-	}
-	mutex_unlock(&qdss.sources_mutex);
-
-	return source ? source : ERR_PTR(-ENOENT);
+	return qdss.modulekobj;
 }
-EXPORT_SYMBOL(qdss_get);
 
-/**
- * qdss_put - release the qdss source handle
- * @name: name of the qdss source
- *
- * CONTEXT:
- * Typically called from driver remove or exit functions
- */
-void qdss_put(struct qdss_source *src)
-{
-}
-EXPORT_SYMBOL(qdss_put);
-
-/**
- * qdss_enable - enable qdss for the source
- * @src: handle for the source making the call
- *
- * Enables qdss block (relevant funnel ports and sink) if not already
- * enabled, otherwise increments the reference count
- *
- * CONTEXT:
- * Might sleep. Uses a mutex lock. Should be called from a non-atomic context.
- *
- * RETURNS:
- * 0 on success, non-zero on failure
- */
-int qdss_enable(struct qdss_source *src)
-{
-	int ret;
-
-	if (!src)
-		return -EINVAL;
-
-	ret = qdss_clk_enable();
-	if (ret)
-		goto err;
-
-	if ((qdss.pdata)->afamily) {
-		mutex_lock(&qdss.sink_mutex);
-		if (qdss.sink_count == 0) {
-			etb_disable();
-			tpiu_disable();
-			/* enable ETB first to avoid losing any trace data */
-			etb_enable();
-		}
-		qdss.sink_count++;
-		mutex_unlock(&qdss.sink_mutex);
-	}
-
-	funnel_enable(0x0, src->fport_mask);
-	return 0;
-err:
-	return ret;
-}
-EXPORT_SYMBOL(qdss_enable);
-
-/**
- * qdss_disable - disable qdss for the source
- * @src: handle for the source making the call
- *
- * Disables qdss block (relevant funnel ports and sink) if the reference count
- * is one, otherwise decrements the reference count
- *
- * CONTEXT:
- * Might sleep. Uses a mutex lock. Should be called from a non-atomic context.
- */
-void qdss_disable(struct qdss_source *src)
-{
-	if (!src)
-		return;
-
-	if ((qdss.pdata)->afamily) {
-		mutex_lock(&qdss.sink_mutex);
-		if (WARN(qdss.sink_count == 0, "qdss is unbalanced\n"))
-			goto out;
-		if (qdss.sink_count == 1) {
-			etb_dump();
-			etb_disable();
-		}
-		qdss.sink_count--;
-		mutex_unlock(&qdss.sink_mutex);
-	}
-
-	funnel_disable(0x0, src->fport_mask);
-	qdss_clk_disable();
-	return;
-out:
-	mutex_unlock(&qdss.sink_mutex);
-}
-EXPORT_SYMBOL(qdss_disable);
-
-/**
- * qdss_disable_sink - force disable the current qdss sink(s)
- *
- * Force disable the current qdss sink(s) to stop the sink from accepting any
- * trace generated subsequent to this call. This function should only be used
- * as a way to stop the sink from getting polluted with trace data that is
- * uninteresting after an event of interest has occured.
- *
- * CONTEXT:
- * Can be called from atomic or non-atomic context.
- */
-void qdss_disable_sink(void)
-{
-	if ((qdss.pdata)->afamily) {
-		etb_dump();
-		etb_disable();
-	}
-}
-EXPORT_SYMBOL(qdss_disable_sink);
-
-/**
- * qdss_clk_enable - enable qdss clocks
- *
- * Enables qdss clocks via RPM if they aren't already enabled, otherwise
- * increments the reference count.
- *
- * CONTEXT:
- * Might sleep. Uses a mutex lock. Should be called from a non-atomic context.
- *
- * RETURNS:
- * 0 on success, non-zero on failure
- */
 int qdss_clk_enable(void)
 {
 	int ret;
-	struct msm_rpm_iv_pair iv;
 
-	mutex_lock(&qdss.clk_mutex);
-	if (qdss.clk_count == 0) {
-		iv.id = MSM_RPM_ID_QDSS_CLK;
-		if (qdss.max_clk)
-			iv.value = QDSS_CLK_ON_HSDBG;
-		else
-			iv.value = QDSS_CLK_ON_DBG;
-		ret = msm_rpmrs_set(MSM_RPM_CTX_SET_0, &iv, 1);
-		if (WARN(ret, "qdss clks not enabled (%d)\n", ret))
-			goto err_clk;
-	}
-	qdss.clk_count++;
-	mutex_unlock(&qdss.clk_mutex);
+	struct msm_rpm_iv_pair iv;
+	iv.id = MSM_RPM_ID_QDSS_CLK;
+	if (qdss.max_clk)
+		iv.value = QDSS_CLK_ON_HSDBG;
+	else
+		iv.value = QDSS_CLK_ON_DBG;
+	ret = msm_rpmrs_set(MSM_RPM_CTX_SET_0, &iv, 1);
+	if (WARN(ret, "qdss clks not enabled (%d)\n", ret))
+		goto err_clk;
+
 	return 0;
 err_clk:
-	mutex_unlock(&qdss.clk_mutex);
 	return ret;
 }
-EXPORT_SYMBOL(qdss_clk_enable);
 
-/**
- * qdss_clk_disable - disable qdss clocks
- *
- * Disables qdss clocks via RPM if the reference count is one, otherwise
- * decrements the reference count.
- *
- * CONTEXT:
- * Might sleep. Uses a mutex lock. Should be called from a non-atomic context.
- */
 void qdss_clk_disable(void)
 {
 	int ret;
 	struct msm_rpm_iv_pair iv;
 
-	mutex_lock(&qdss.clk_mutex);
-	if (WARN(qdss.clk_count == 0, "qdss clks are unbalanced\n"))
-		goto out;
-	if (qdss.clk_count == 1) {
-		iv.id = MSM_RPM_ID_QDSS_CLK;
-		iv.value = QDSS_CLK_OFF;
-		ret = msm_rpmrs_set(MSM_RPM_CTX_SET_0, &iv, 1);
-		WARN(ret, "qdss clks not disabled (%d)\n", ret);
-	}
-	qdss.clk_count--;
-out:
-	mutex_unlock(&qdss.clk_mutex);
-}
-EXPORT_SYMBOL(qdss_clk_disable);
-
-struct kobject *qdss_get_modulekobj(void)
-{
-	return qdss.modulekobj;
+	iv.id = MSM_RPM_ID_QDSS_CLK;
+	iv.value = QDSS_CLK_OFF;
+	ret = msm_rpmrs_set(MSM_RPM_CTX_SET_0, &iv, 1);
+	WARN(ret, "qdss clks not disabled (%d)\n", ret);
 }
 
 #define QDSS_ATTR(name)						\
@@ -290,16 +97,6 @@ static ssize_t max_clk_show(struct kobject *kobj,
 }
 QDSS_ATTR(max_clk);
 
-static void __devinit qdss_add_sources(struct qdss_source *srcs, size_t num)
-{
-	mutex_lock(&qdss.sources_mutex);
-	while (num--) {
-		list_add_tail(&srcs->link, &qdss.sources);
-		srcs++;
-	}
-	mutex_unlock(&qdss.sources_mutex);
-}
-
 static int __init qdss_sysfs_init(void)
 {
 	int ret;
@@ -322,85 +119,54 @@ err:
 	return ret;
 }
 
-static void __devexit qdss_sysfs_exit(void)
+static void qdss_sysfs_exit(void)
 {
 	sysfs_remove_file(qdss.modulekobj, &max_clk_attr.attr);
 }
 
-static int __devinit qdss_probe(struct platform_device *pdev)
-{
-	int ret;
-	struct qdss_source *src_table;
-	size_t num_srcs;
-
-	mutex_init(&qdss.sources_mutex);
-	mutex_init(&qdss.clk_mutex);
-	mutex_init(&qdss.sink_mutex);
-
-	if (pdev->dev.platform_data == NULL) {
-		pr_err("%s: platform data is NULL\n", __func__);
-		ret = -ENODEV;
-		goto err_pdata;
-	}
-	qdss.pdata = pdev->dev.platform_data;
-
-	INIT_LIST_HEAD(&qdss.sources);
-	src_table = (qdss.pdata)->src_table;
-	num_srcs = (qdss.pdata)->size;
-	qdss_add_sources(src_table, num_srcs);
-
-	pr_info("QDSS arch initialized\n");
-	return 0;
-err_pdata:
-	mutex_destroy(&qdss.sink_mutex);
-	mutex_destroy(&qdss.clk_mutex);
-	mutex_destroy(&qdss.sources_mutex);
-	pr_err("QDSS init failed\n");
-	return ret;
-}
-
-static int __devexit qdss_remove(struct platform_device *pdev)
-{
-	qdss_sysfs_exit();
-	mutex_destroy(&qdss.sink_mutex);
-	mutex_destroy(&qdss.clk_mutex);
-	mutex_destroy(&qdss.sources_mutex);
-
-	return 0;
-}
-
-static struct platform_driver qdss_driver = {
-	.probe          = qdss_probe,
-	.remove         = __devexit_p(qdss_remove),
-	.driver         = {
-		.name   = "msm_qdss",
-	},
-};
-
 static int __init qdss_init(void)
-{
-	return platform_driver_register(&qdss_driver);
-}
-arch_initcall(qdss_init);
-
-static int __init qdss_module_init(void)
 {
 	int ret;
 
 	ret = qdss_sysfs_init();
 	if (ret)
 		goto err_sysfs;
+	ret = etb_init();
+	if (ret)
+		goto err_etb;
+	ret = tpiu_init();
+	if (ret)
+		goto err_tpiu;
+	ret = funnel_init();
+	if (ret)
+		goto err_funnel;
+	ret = etm_init();
+	if (ret)
+		goto err_etm;
 
-	pr_info("QDSS module initialized\n");
+	pr_info("QDSS initialized\n");
 	return 0;
+err_etm:
+	funnel_exit();
+err_funnel:
+	tpiu_exit();
+err_tpiu:
+	etb_exit();
+err_etb:
+	qdss_sysfs_exit();
 err_sysfs:
+	pr_err("QDSS init failed\n");
 	return ret;
 }
-module_init(qdss_module_init);
+module_init(qdss_init);
 
 static void __exit qdss_exit(void)
 {
-	platform_driver_unregister(&qdss_driver);
+	qdss_sysfs_exit();
+	etm_exit();
+	funnel_exit();
+	tpiu_exit();
+	etb_exit();
 }
 module_exit(qdss_exit);
 

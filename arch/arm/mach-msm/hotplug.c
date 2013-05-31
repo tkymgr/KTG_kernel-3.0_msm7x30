@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 2002 ARM Ltd.
+ *  Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *  All Rights Reserved
- *  Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -15,10 +15,10 @@
 #include <asm/cacheflush.h>
 #include <asm/vfp.h>
 
-#include <mach/qdss.h>
 #include <mach/msm_rtb.h>
 
 #include "pm.h"
+#include "qdss.h"
 #include "spm.h"
 
 extern volatile int pen_release;

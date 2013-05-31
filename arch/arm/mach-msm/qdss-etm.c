@@ -29,7 +29,7 @@
 #include <asm/sections.h>
 #include <mach/socinfo.h>
 
-#include "qdss-priv.h"
+#include "qdss.h"
 
 #define etm_writel(etm, cpu, val, off)	\
 			__raw_writel((val), etm.base + (SZ_4K * cpu) + off)
@@ -156,7 +156,6 @@ struct etm_ctx {
 	bool				enabled;
 	struct wake_lock		wake_lock;
 	struct pm_qos_request_list	qos_req;
-	struct qdss_source		*src;
 	struct mutex			mutex;
 	struct device			*dev;
 	struct kobject			*kobj;
@@ -340,6 +339,10 @@ static int etm_enable(void)
 		goto err;
 	}
 
+	ret = qdss_clk_enable();
+	if (ret)
+		goto err;
+
 	wake_lock(&etm.wake_lock);
 	/* 1. causes all online cpus to come out of idle PC
 	 * 2. prevents idle PC until save restore flag is enabled atomically
@@ -350,10 +353,11 @@ static int etm_enable(void)
 	 */
 	pm_qos_update_request(&etm.qos_req, 0);
 
-	ret = qdss_enable(etm.src);
-	if (ret)
-		goto err_qdss;
-
+	etb_disable();
+	tpiu_disable();
+	/* enable ETB first to avoid loosing any trace data */
+	etb_enable();
+	funnel_enable(0x0, 0x3);
 	for_each_online_cpu(cpu)
 		__etm_enable(cpu);
 
@@ -364,10 +368,6 @@ static int etm_enable(void)
 
 	dev_info(etm.dev, "ETM tracing enabled\n");
 	return 0;
-
-err_qdss:
-	pm_qos_update_request(&etm.qos_req, PM_QOS_DEFAULT_VALUE);
-	wake_unlock(&etm.wake_lock);
 err:
 	return ret;
 }
@@ -407,13 +407,16 @@ static int etm_disable(void)
 
 	for_each_online_cpu(cpu)
 		__etm_disable(cpu);
-
-	qdss_disable(etm.src);
+	etb_dump();
+	etb_disable();
+	funnel_disable(0x0, 0x3);
 
 	etm.enabled = false;
 
 	pm_qos_update_request(&etm.qos_req, PM_QOS_DEFAULT_VALUE);
 	wake_unlock(&etm.wake_lock);
+
+	qdss_clk_disable();
 
 	dev_info(etm.dev, "ETM tracing disabled\n");
 	return 0;
@@ -430,8 +433,8 @@ static void etm_os_unlock(void *unused)
 	asm("isb\n\t");
 }
 
-#define ETM_STORE(__name, mask)						\
-static ssize_t __name##_store(struct kobject *kobj,			\
+#define ETM_STORE(name, mask)						\
+static ssize_t name##_store(struct kobject *kobj,			\
 			struct kobj_attribute *attr,			\
 			const char *buf, size_t n)			\
 {									\
@@ -440,25 +443,25 @@ static ssize_t __name##_store(struct kobject *kobj,			\
 	if (sscanf(buf, "%lx", &val) != 1)				\
 		return -EINVAL;						\
 									\
-	etm.__name = val & mask;					\
+	etm.name = val & mask;						\
 	return n;							\
 }
 
-#define ETM_SHOW(__name)						\
-static ssize_t __name##_show(struct kobject *kobj,			\
+#define ETM_SHOW(name)							\
+static ssize_t name##_show(struct kobject *kobj,			\
 			struct kobj_attribute *attr,			\
 			char *buf)					\
 {									\
-	unsigned long val = etm.__name;					\
+	unsigned long val = etm.name;					\
 	return scnprintf(buf, PAGE_SIZE, "%#lx\n", val);		\
 }
 
-#define ETM_ATTR(__name)						\
-static struct kobj_attribute __name##_attr =				\
-	__ATTR(__name, S_IRUGO | S_IWUSR, __name##_show, __name##_store)
-#define ETM_ATTR_RO(__name)						\
-static struct kobj_attribute __name##_attr =				\
-	__ATTR(__name, S_IRUGO, __name##_show, NULL)
+#define ETM_ATTR(name)							\
+static struct kobj_attribute name##_attr =				\
+		__ATTR(name, S_IRUGO | S_IWUSR, name##_show, name##_store)
+#define ETM_ATTR_RO(name)						\
+static struct kobj_attribute name##_attr =				\
+		__ATTR(name, S_IRUGO, name##_show, NULL)
 
 static ssize_t enabled_store(struct kobject *kobj,
 			struct kobj_attribute *attr,
@@ -1120,7 +1123,7 @@ static struct attribute_group etm_attr_grp = {
 	.attrs = etm_attrs,
 };
 
-static int __devinit etm_sysfs_init(void)
+static int __init etm_sysfs_init(void)
 {
 	int ret;
 
@@ -1148,14 +1151,14 @@ err_create:
 	return ret;
 }
 
-static void __devexit etm_sysfs_exit(void)
+static void etm_sysfs_exit(void)
 {
 	sysfs_remove_group(etm.kobj, &etm_attr_grp);
 	sysfs_remove_file(etm.kobj, &enabled_attr.attr);
 	kobject_put(etm.kobj);
 }
 
-static bool __devinit etm_arch_supported(uint8_t arch)
+static bool etm_arch_supported(uint8_t arch)
 {
 	switch (arch) {
 	case PFT_ARCH_V1_1:
@@ -1166,7 +1169,7 @@ static bool __devinit etm_arch_supported(uint8_t arch)
 	return true;
 }
 
-static int __devinit etm_arch_init(void)
+static int __init etm_arch_init(void)
 {
 	int ret, i;
 	/* use cpu 0 for setup */
@@ -1246,12 +1249,6 @@ static int __devinit etm_probe(struct platform_device *pdev)
 	wake_lock_init(&etm.wake_lock, WAKE_LOCK_SUSPEND, "msm_etm");
 	pm_qos_add_request(&etm.qos_req, PM_QOS_CPU_DMA_LATENCY,
 						PM_QOS_DEFAULT_VALUE);
-	etm.src = qdss_get("msm_etm");
-	if (IS_ERR(etm.src)) {
-		ret = PTR_ERR(etm.src);
-		goto err_qdssget;
-	}
-
 	ret = qdss_clk_enable();
 	if (ret)
 		goto err_clk;
@@ -1279,8 +1276,6 @@ err_sysfs:
 err_arch:
 	qdss_clk_disable();
 err_clk:
-	qdss_put(etm.src);
-err_qdssget:
 	pm_qos_remove_request(&etm.qos_req);
 	wake_lock_destroy(&etm.wake_lock);
 	mutex_destroy(&etm.mutex);
@@ -1291,12 +1286,11 @@ err_res:
 	return ret;
 }
 
-static int __devexit etm_remove(struct platform_device *pdev)
+static int etm_remove(struct platform_device *pdev)
 {
 	if (etm.enabled)
 		etm_disable();
 	etm_sysfs_exit();
-	qdss_put(etm.src);
 	pm_qos_remove_request(&etm.qos_req);
 	wake_lock_destroy(&etm.wake_lock);
 	mutex_destroy(&etm.mutex);
@@ -1307,7 +1301,7 @@ static int __devexit etm_remove(struct platform_device *pdev)
 
 static struct platform_driver etm_driver = {
 	.probe          = etm_probe,
-	.remove         = __devexit_p(etm_remove),
+	.remove         = etm_remove,
 	.driver         = {
 		.name   = "msm_etm",
 	},
@@ -1317,13 +1311,8 @@ int __init etm_init(void)
 {
 	return platform_driver_register(&etm_driver);
 }
-module_init(etm_init);
 
-void __exit etm_exit(void)
+void etm_exit(void)
 {
 	platform_driver_unregister(&etm_driver);
 }
-module_exit(etm_exit);
-
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("CoreSight Program Flow Trace driver");

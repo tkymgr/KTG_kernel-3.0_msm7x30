@@ -26,12 +26,39 @@
 
 static void __init msm_dt_timer_init(void)
 {
-	arch_timer_of_register();
+	struct device_node *node;
+	struct resource res;
+	struct of_irq oirq;
+
+	node = of_find_compatible_node(NULL, NULL, "qcom,msm-qtimer");
+	if (!node) {
+		pr_err("no matching timer node found\n");
+		return;
+	}
+
+	if (of_irq_map_one(node, 0, &oirq)) {
+		pr_err("interrupt not specified in timer node\n");
+	} else {
+		res.start = res.end = oirq.specifier[0];
+		res.flags = IORESOURCE_IRQ;
+		arch_timer_register(&res, 1);
+	}
+	of_node_put(node);
 }
 
 static struct sys_timer msm_dt_timer = {
 	.init = msm_dt_timer_init
 };
+
+int __cpuinit local_timer_setup(struct clock_event_device *evt)
+{
+	return 0;
+}
+
+void local_timer_stop(void)
+{
+	return;
+}
 
 static void __init msm_dt_init_irq(void)
 {
@@ -55,13 +82,11 @@ static void __init msm_dt_init(void)
 		msm_copper_init(&adata);
 
 	of_platform_populate(NULL, of_default_bus_match_table, adata, NULL);
-	if (machine_is_copper()) {
+	if (machine_is_copper())
 		msm_copper_add_devices();
-		msm_copper_add_drivers();
-	}
 }
 
-static const char *msm_dt_match[] __initconst = {
+static const char *msm_dt_match[] __initdata = {
 	"qcom,msmcopper",
 	NULL
 };
@@ -85,7 +110,6 @@ DT_MACHINE_START(MSM_DT, "Qualcomm MSM (Flattened Device Tree)")
 	.handle_irq = gic_handle_irq,
 	.timer = &msm_dt_timer,
 	.dt_compat = msm_dt_match,
-	.nr_irqs = -1,
 	.reserve = msm_dt_reserve,
 	.init_very_early = msm_dt_init_very_early,
 MACHINE_END

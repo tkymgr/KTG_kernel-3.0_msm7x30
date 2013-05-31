@@ -443,7 +443,6 @@ u32 send_adm_apr(void *buf, u32 opcode)
 
 
 	if (payload_size > MAX_PAYLOAD_SIZE) {
-
 			pr_err("%s: Invalid payload size = %d\n",
 				__func__, payload_size);
 		goto done;
@@ -614,7 +613,6 @@ u32 send_rtac_asm_apr(void *buf, u32 opcode)
 	}
 
 	if (payload_size > MAX_PAYLOAD_SIZE) {
-
 			pr_err("%s: Invalid payload size = %d\n",
 				__func__, payload_size);
 		goto done;
@@ -625,17 +623,15 @@ u32 send_rtac_asm_apr(void *buf, u32 opcode)
 			__func__);
 		goto done;
 	}
-	if (session_id > (SESSION_MAX + 1)) {
+	if (session_id > SESSION_MAX) {
 		pr_err("%s: Invalid Session = %d\n", __func__, session_id);
 		goto done;
 	}
 
 	mutex_lock(&rtac_asm_apr_mutex);
-	if (session_id < SESSION_MAX+1) {
-		if (rtac_asm_apr_data[session_id].apr_handle == NULL) {
-			pr_err("%s: APR not initialized\n", __func__);
-			goto err;
-		}
+	if (rtac_asm_apr_data[session_id].apr_handle == NULL) {
+		pr_err("%s: APR not initialized\n", __func__);
+		goto err;
 	}
 
 	/* Set globals for copy of returned payload */
@@ -664,8 +660,7 @@ u32 send_rtac_asm_apr(void *buf, u32 opcode)
 	asm_params.opcode = opcode;
 
 	memcpy(rtac_asm_buffer, &asm_params, sizeof(asm_params));
-	if (session_id < SESSION_MAX+1)
-		atomic_set(&rtac_asm_apr_data[session_id].cmd_state, 1);
+	atomic_set(&rtac_asm_apr_data[session_id].cmd_state, 1);
 
 	pr_debug("%s: Sending RTAC command size = %d, session_id=%d\n",
 		__func__, asm_params.pkt_size, session_id);
@@ -784,7 +779,7 @@ u32 send_voice_apr(u32 mode, void *buf, u32 opcode)
 	}
 
 	if (payload_size > MAX_PAYLOAD_SIZE) {
-		pr_err("%s: Invalid payload size = %d\n",
+			pr_err("%s: Invalid payload size = %d\n",
 				__func__, payload_size);
 		goto done;
 	}

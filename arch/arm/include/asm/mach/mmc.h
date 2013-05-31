@@ -51,15 +51,6 @@ struct msm_mmc_reg_data {
 	bool always_on;
 	/* is low power mode setting required for this regulator? */
 	bool lpm_sup;
-	/*
-	 * Use to indicate if the regulator should be reset at boot time.
-	 * Its needed only when sd card's vdd regulator is always on
-	 * since always on regulators dont get reset at boot time.
-	 *
-	 * It is needed for sd 3.0 card to be detected as a sd 3.0 card
-	 * on device reboot.
-	 */
-	bool reset_at_init;
 };
 
 /*
@@ -142,8 +133,6 @@ struct mmc_platform_data {
 	unsigned int xpc_cap;
 	/* Supported UHS-I Modes */
 	unsigned int uhs_caps;
-	/* More capabilities */
-	unsigned int uhs_caps2;
 	void (*sdio_lpm_gpio_setup)(struct device *, unsigned int);
         unsigned int status_irq;
 	unsigned int status_gpio;
@@ -169,7 +158,7 @@ struct mmc_platform_data {
 	bool disable_bam;
 	bool disable_runtime_pm;
 	bool disable_cmd23;
-	u32 cpu_dma_latency;
+	u32 swfi_latency;
 	struct msm_mmc_bus_voting_data *msm_bus_voting_data;
 };
 

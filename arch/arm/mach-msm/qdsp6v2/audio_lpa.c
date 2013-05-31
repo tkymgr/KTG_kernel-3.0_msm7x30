@@ -2,7 +2,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2011, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -45,7 +45,7 @@
 #include <mach/debug_mm.h>
 #include <linux/fs.h>
 
-#define MAX_BUF 4
+#define MAX_BUF 3
 #define BUFSZ (524288)
 
 #define AUDDEC_DEC_PCM 0
@@ -840,6 +840,10 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				.step = SOFT_VOLUME_STEP,
 				.rampingcurve = SOFT_VOLUME_CURVE_LINEAR,
 			};
+			if (softpause.rampingcurve == SOFT_PAUSE_CURVE_LINEAR)
+				softpause.step = SOFT_PAUSE_STEP_LINEAR;
+			if (softvol.rampingcurve == SOFT_VOLUME_CURVE_LINEAR)
+				softvol.step = SOFT_VOLUME_STEP_LINEAR;
 			audio->out_enabled = 1;
 			audio->out_needed = 1;
 			rc = q6asm_set_volume(audio->ac, audio->volume);

@@ -124,7 +124,7 @@ struct ehci_hcd {			/* one per controller */
 	ktime_t			last_periodic_enable;
 	u32			command;
 
-	unsigned		log2_irq_thresh;
+	void (*start_hnp)(struct ehci_hcd *ehci);
 
 	/* SILICON QUIRKS */
 	unsigned		no_selective_suspend:1;
@@ -139,10 +139,6 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		fs_i_thresh:1;	/* Intel iso scheduling */
 	unsigned		use_dummy_qh:1;	/* AMD Frame List table quirk*/
 	unsigned		has_synopsys_hc_bug:1; /* Synopsys HC */
-	unsigned		frame_index_bug:1; /* MosChip (AKA NetMos) */
-	unsigned		susp_sof_bug:1; /*Chip Idea HC*/
-	unsigned		resume_sof_bug:1;/*Chip Idea HC*/
-	unsigned		reset_sof_bug:1; /*Chip Idea HC*/
 
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
@@ -757,22 +753,6 @@ static inline void ehci_sync_mem(void)
 static inline void ehci_sync_mem(void)
 {
 }
-#endif
-
-/*-------------------------------------------------------------------------*/
-
-#ifdef CONFIG_PCI
-
-/* For working around the MosChip frame-index-register bug */
-static unsigned ehci_read_frame_index(struct ehci_hcd *ehci);
-
-#else
-
-static inline unsigned ehci_read_frame_index(struct ehci_hcd *ehci)
-{
-	return ehci_readl(ehci, &ehci->regs->frame_index);
-}
-
 #endif
 
 /*-------------------------------------------------------------------------*/

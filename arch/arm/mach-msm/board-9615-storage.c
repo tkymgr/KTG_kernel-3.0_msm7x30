@@ -217,13 +217,15 @@ static struct mmc_platform_data *msm9615_sdc2_pdata;
 
 void __init msm9615_init_mmc(void)
 {
-	if (msm9615_sdc1_pdata)
+	if (msm9615_sdc1_pdata) {
 		/* SDC1: External card slot for SD/MMC cards */
 		msm_add_sdcc(1, msm9615_sdc1_pdata);
+	}
 
-	if (msm9615_sdc2_pdata)
+	if (msm9615_sdc2_pdata) {
 		/* SDC2: External card slot used for WLAN */
 		msm_add_sdcc(2, msm9615_sdc2_pdata);
+	}
 }
 #else
 void __init msm9615_init_mmc(void)

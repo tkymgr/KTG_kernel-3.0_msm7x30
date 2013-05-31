@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/clock.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2007-2011, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -21,16 +21,9 @@
 #include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/clkdev.h>
-#include <linux/list.h>
-#include <trace/events/power.h>
+#include <linux/dma-mapping.h>
 
 #include "clock.h"
-
-struct handoff_clk {
-	struct list_head list;
-	struct clk *clk;
-};
-static LIST_HEAD(handoff_list);
 
 /* Find the voltage level required for a given rate. */
 static int find_vdd_level(struct clk *clk, unsigned long rate)
@@ -135,43 +128,38 @@ static void unvote_rate_vdd(struct clk *clk, unsigned long rate)
 	unvote_vdd_level(clk->vdd_class, level);
 }
 
-int clk_prepare(struct clk *clk)
+#ifdef CONFIG_CLOCK_MAP
+static unsigned clock_count;
+unsigned long *clock_enable_map;
+
+static void clk_log_map_init(size_t count)
 {
-	int ret = 0;
-	struct clk *parent;
-
-	if (!clk)
-		return 0;
-	if (IS_ERR(clk))
-		return -EINVAL;
-
-	mutex_lock(&clk->prepare_lock);
-	if (clk->prepare_count == 0) {
-		parent = clk_get_parent(clk);
-
-		ret = clk_prepare(parent);
-		if (ret)
-			goto out;
-		ret = clk_prepare(clk->depends);
-		if (ret)
-			goto err_prepare_depends;
-
-		if (clk->ops->prepare)
-			ret = clk->ops->prepare(clk);
-		if (ret)
-			goto err_prepare_clock;
-	}
-	clk->prepare_count++;
-out:
-	mutex_unlock(&clk->prepare_lock);
-	return ret;
-err_prepare_clock:
-	clk_unprepare(clk->depends);
-err_prepare_depends:
-	clk_unprepare(parent);
-	goto out;
+	dma_addr_t addr;
+	clock_enable_map = dma_alloc_coherent(NULL, BITS_TO_LONGS(count), &addr,
+					      GFP_KERNEL);
 }
-EXPORT_SYMBOL(clk_prepare);
+
+static void clk_log_map_register(struct clk *clk)
+{
+	if (!clk->id)
+		clk->id = clock_count++;
+}
+
+static void clk_log_map_enable(struct clk *clk)
+{
+	__set_bit(clk->id, clock_enable_map);
+}
+
+static void clk_log_map_disable(struct clk *clk)
+{
+	__clear_bit(clk->id, clock_enable_map);
+}
+#else
+static void clk_log_map_init(size_t count) { }
+static void clk_log_map_register(struct clk *clk) { }
+static void clk_log_map_enable(struct clk *clk) { }
+static void clk_log_map_disable(struct clk *clk) { }
+#endif
 
 /*
  * Standard clock functions defined in include/linux/clk.h
@@ -184,8 +172,6 @@ int clk_enable(struct clk *clk)
 
 	if (!clk)
 		return 0;
-	if (IS_ERR(clk))
-		return -EINVAL;
 
 	spin_lock_irqsave(&clk->lock, flags);
 	if (clk->count == 0) {
@@ -201,13 +187,24 @@ int clk_enable(struct clk *clk)
 		ret = vote_rate_vdd(clk, clk->rate);
 		if (ret)
 			goto err_vote_vdd;
-		trace_clock_enable(clk->dbg_name, 1, smp_processor_id());
-		if (clk->ops->enable)
+		if (clk->ops->enable) {
 			ret = clk->ops->enable(clk);
+			clk_log_map_enable(clk);
+		}
 		if (ret)
 			goto err_enable_clock;
+	} else if (clk->flags & CLKFLAG_HANDOFF_RATE) {
+		/*
+		 * The clock was already enabled by handoff code so there is no
+		 * need to enable it again here. Clearing the handoff flag will
+		 * prevent the lateinit handoff code from disabling the clock if
+		 * a client driver still has it enabled.
+		 */
+		clk->flags &= ~CLKFLAG_HANDOFF_RATE;
+		goto out;
 	}
 	clk->count++;
+out:
 	spin_unlock_irqrestore(&clk->lock, flags);
 
 	return 0;
@@ -228,7 +225,7 @@ void clk_disable(struct clk *clk)
 {
 	unsigned long flags;
 
-	if (IS_ERR_OR_NULL(clk))
+	if (!clk)
 		return;
 
 	spin_lock_irqsave(&clk->lock, flags);
@@ -237,9 +234,10 @@ void clk_disable(struct clk *clk)
 	if (clk->count == 1) {
 		struct clk *parent = clk_get_parent(clk);
 
-		trace_clock_disable(clk->dbg_name, 0, smp_processor_id());
-		if (clk->ops->disable)
+		if (clk->ops->disable) {
 			clk->ops->disable(clk);
+			clk_log_map_disable(clk);
+		}
 		unvote_rate_vdd(clk, clk->rate);
 		clk_disable(clk->depends);
 		clk_disable(parent);
@@ -250,37 +248,8 @@ out:
 }
 EXPORT_SYMBOL(clk_disable);
 
-void clk_unprepare(struct clk *clk)
-{
-	if (IS_ERR_OR_NULL(clk))
-		return;
-
-	mutex_lock(&clk->prepare_lock);
-	if (!clk->prepare_count) {
-		if (WARN(!clk->warned, "%s is unbalanced (prepare)",
-				clk->dbg_name))
-			clk->warned = true;
-		goto out;
-	}
-	if (clk->prepare_count == 1) {
-		struct clk *parent = clk_get_parent(clk);
-
-		if (clk->ops->unprepare)
-			clk->ops->unprepare(clk);
-		clk_unprepare(clk->depends);
-		clk_unprepare(parent);
-	}
-	clk->prepare_count--;
-out:
-	mutex_unlock(&clk->prepare_lock);
-}
-EXPORT_SYMBOL(clk_unprepare);
-
 int clk_reset(struct clk *clk, enum clk_reset_action action)
 {
-	if (IS_ERR_OR_NULL(clk))
-		return -EINVAL;
-
 	if (!clk->ops->reset)
 		return -ENOSYS;
 
@@ -290,11 +259,8 @@ EXPORT_SYMBOL(clk_reset);
 
 unsigned long clk_get_rate(struct clk *clk)
 {
-	if (IS_ERR_OR_NULL(clk))
-		return 0;
-
 	if (!clk->ops->get_rate)
-		return clk->rate;
+		return 0;
 
 	return clk->ops->get_rate(clk);
 }
@@ -305,14 +271,10 @@ int clk_set_rate(struct clk *clk, unsigned long rate)
 	unsigned long start_rate, flags;
 	int rc;
 
-	if (IS_ERR_OR_NULL(clk))
-		return -EINVAL;
-
 	if (!clk->ops->set_rate)
 		return -ENOSYS;
 
 	spin_lock_irqsave(&clk->lock, flags);
-	trace_clock_set_rate(clk->dbg_name, rate, smp_processor_id());
 	if (clk->count) {
 		start_rate = clk->rate;
 		/* Enforce vdd requirements for target frequency. */
@@ -344,9 +306,6 @@ EXPORT_SYMBOL(clk_set_rate);
 
 long clk_round_rate(struct clk *clk, unsigned long rate)
 {
-	if (IS_ERR_OR_NULL(clk))
-		return -EINVAL;
-
 	if (!clk->ops->round_rate)
 		return -ENOSYS;
 
@@ -356,9 +315,6 @@ EXPORT_SYMBOL(clk_round_rate);
 
 int clk_set_max_rate(struct clk *clk, unsigned long rate)
 {
-	if (IS_ERR_OR_NULL(clk))
-		return -EINVAL;
-
 	if (!clk->ops->set_max_rate)
 		return -ENOSYS;
 
@@ -377,9 +333,6 @@ EXPORT_SYMBOL(clk_set_parent);
 
 struct clk *clk_get_parent(struct clk *clk)
 {
-	if (IS_ERR_OR_NULL(clk))
-		return NULL;
-
 	if (!clk->ops->get_parent)
 		return NULL;
 
@@ -389,7 +342,7 @@ EXPORT_SYMBOL(clk_get_parent);
 
 int clk_set_flags(struct clk *clk, unsigned long flags)
 {
-	if (IS_ERR_OR_NULL(clk))
+	if (clk == NULL || IS_ERR(clk))
 		return -EINVAL;
 	if (!clk->ops->set_flags)
 		return -ENOSYS;
@@ -400,91 +353,34 @@ EXPORT_SYMBOL(clk_set_flags);
 
 static struct clock_init_data __initdata *clk_init_data;
 
-static enum handoff __init __handoff_clk(struct clk *clk)
-{
-	enum handoff ret;
-	struct handoff_clk *h;
-	unsigned long rate;
-	int err = 0;
-
-	/*
-	 * Tree roots don't have parents, but need to be handed off. So,
-	 * terminate recursion by returning "enabled". Also return "enabled"
-	 * for clocks with non-zero enable counts since they must have already
-	 * been handed off.
-	 */
-	if (clk == NULL || clk->count)
-		return HANDOFF_ENABLED_CLK;
-
-	/* Clocks without handoff functions are assumed to be disabled. */
-	if (!clk->ops->handoff || (clk->flags & CLKFLAG_SKIP_HANDOFF))
-		return HANDOFF_DISABLED_CLK;
-
-	/*
-	 * Handoff functions for children must be called before their parents'
-	 * so that the correct parent is returned by the clk_get_parent() below.
-	 */
-	ret = clk->ops->handoff(clk);
-	if (ret == HANDOFF_ENABLED_CLK) {
-		ret = __handoff_clk(clk_get_parent(clk));
-		if (ret == HANDOFF_ENABLED_CLK) {
-			h = kmalloc(sizeof(*h), GFP_KERNEL);
-			if (!h) {
-				err = -ENOMEM;
-				goto out;
-			}
-			err = clk_prepare_enable(clk);
-			if (err)
-				goto out;
-			rate = clk_get_rate(clk);
-			if (rate)
-				pr_debug("%s rate=%lu\n", clk->dbg_name, rate);
-			h->clk = clk;
-			list_add_tail(&h->list, &handoff_list);
-		}
-	}
-out:
-	if (err) {
-		pr_err("%s handoff failed (%d)\n", clk->dbg_name, err);
-		kfree(h);
-		ret = HANDOFF_DISABLED_CLK;
-	}
-	return ret;
-}
-
 void __init msm_clock_init(struct clock_init_data *data)
 {
 	unsigned n;
 	struct clk_lookup *clock_tbl;
 	size_t num_clocks;
-	struct clk *clk;
 
+	clk_log_map_init(500);
 	clk_init_data = data;
-	if (clk_init_data->pre_init)
-		clk_init_data->pre_init();
+	if (clk_init_data->init)
+		clk_init_data->init();
 
 	clock_tbl = data->table;
 	num_clocks = data->size;
 
 	for (n = 0; n < num_clocks; n++) {
-		struct clk *parent;
-		clk = clock_tbl[n].clk;
-		parent = clk_get_parent(clk);
-		if (parent && list_empty(&clk->siblings))
-			list_add(&clk->siblings, &parent->children);
+		struct clk *clk = clock_tbl[n].clk;
+		struct clk *parent = clk_get_parent(clk);
+		clk_log_map_register(clk);
+		clk_set_parent(clk, parent);
+		if (clk->ops->handoff && !(clk->flags & CLKFLAG_HANDOFF_RATE)) {
+			if (clk->ops->handoff(clk)) {
+				clk->flags |= CLKFLAG_HANDOFF_RATE;
+				clk_enable(clk);
+			}
+		}
 	}
 
-	/*
-	 * Detect and preserve initial clock state until clock_late_init() or
-	 * a driver explicitly changes it, whichever is first.
-	 */
-	for (n = 0; n < num_clocks; n++)
-		__handoff_clk(clock_tbl[n].clk);
-
 	clkdev_add_table(clock_tbl, num_clocks);
-
-	if (clk_init_data->post_init)
-		clk_init_data->post_init();
 }
 
 /*
@@ -495,32 +391,35 @@ void __init msm_clock_init(struct clock_init_data *data)
 static int __init clock_late_init(void)
 {
 	unsigned n, count = 0;
-	struct handoff_clk *h, *h_temp;
 	unsigned long flags;
 	int ret = 0;
 
 	clock_debug_init(clk_init_data);
 	for (n = 0; n < clk_init_data->size; n++) {
 		struct clk *clk = clk_init_data->table[n].clk;
+		bool handoff = false;
 
 		clock_debug_add(clk);
-		spin_lock_irqsave(&clk->lock, flags);
 		if (!(clk->flags & CLKFLAG_SKIP_AUTO_OFF)) {
+			spin_lock_irqsave(&clk->lock, flags);
 			if (!clk->count && clk->ops->auto_off) {
 				count++;
 				clk->ops->auto_off(clk);
 			}
+			if (clk->flags & CLKFLAG_HANDOFF_RATE) {
+				clk->flags &= ~CLKFLAG_HANDOFF_RATE;
+				handoff = true;
+			}
+			spin_unlock_irqrestore(&clk->lock, flags);
+			/*
+			 * Calling clk_disable() outside the lock is safe since
+			 * it doesn't need to be atomic with the flag change.
+			 */
+			if (handoff)
+				clk_disable(clk);
 		}
-		spin_unlock_irqrestore(&clk->lock, flags);
 	}
 	pr_info("clock_late_init() disabled %d unused clocks\n", count);
-
-	list_for_each_entry_safe(h, h_temp, &handoff_list, list) {
-		clk_disable_unprepare(h->clk);
-		list_del(&h->list);
-		kfree(h);
-	}
-
 	if (clk_init_data->late_init)
 		ret = clk_init_data->late_init();
 	return ret;

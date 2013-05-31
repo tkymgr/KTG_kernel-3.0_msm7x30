@@ -20,7 +20,7 @@
 #include <mach/qdsp6v2/audio_acdb.h>
 
 
-#define MAX_NETWORKS		15
+#define MAX_NETWORKS		12
 
 struct sidetone_atomic_cal {
 	atomic_t	enable;
@@ -633,7 +633,6 @@ static int register_memory(void)
 {
 	int			result;
 	unsigned long		paddr;
-	void                    *kvptr;
 	unsigned long		kvaddr;
 	unsigned long		mem_len;
 
@@ -642,7 +641,6 @@ static int register_memory(void)
 		msm_ion_client_create(UINT_MAX, "audio_acdb_client");
 	if (IS_ERR_OR_NULL(acdb_data.ion_client)) {
 		pr_err("%s: Could not register ION client!!!\n", __func__);
-		result = PTR_ERR(acdb_data.ion_client);
 		goto err;
 	}
 
@@ -650,7 +648,6 @@ static int register_memory(void)
 		atomic_read(&acdb_data.map_handle));
 	if (IS_ERR_OR_NULL(acdb_data.ion_handle)) {
 		pr_err("%s: Could not import map handle!!!\n", __func__);
-		result = PTR_ERR(acdb_data.ion_handle);
 		goto err_ion_client;
 	}
 
@@ -661,14 +658,12 @@ static int register_memory(void)
 		goto err_ion_handle;
 	}
 
-	kvptr = ion_map_kernel(acdb_data.ion_client,
+	kvaddr = (unsigned long)ion_map_kernel(acdb_data.ion_client,
 		acdb_data.ion_handle, 0);
-	if (IS_ERR_OR_NULL(kvptr)) {
+	if (IS_ERR_OR_NULL(&kvaddr)) {
 		pr_err("%s: Could not get kernel virt addr!!!\n", __func__);
-		result = PTR_ERR(kvptr);
 		goto err_ion_handle;
 	}
-	kvaddr = (unsigned long)kvptr;
 	atomic64_set(&acdb_data.paddr, paddr);
 	atomic64_set(&acdb_data.kvaddr, kvaddr);
 	atomic64_set(&acdb_data.mem_len, mem_len);

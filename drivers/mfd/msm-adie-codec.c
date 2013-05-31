@@ -193,18 +193,4 @@ int adie_codec_set_master_mode(struct adie_codec_path *path_ptr, u8 master)
 }
 EXPORT_SYMBOL(adie_codec_set_master_mode);
 
-int adie_codec_powerup(u8 enable)
-{
-	int rc = 0;
-
-	if (cur_adie_ops != NULL) {
-		if (cur_adie_ops->codec_powerup)
-			rc = cur_adie_ops->codec_powerup(enable);
-	} else {
-		rc = -ENODEV;
-	}
-
-	return rc;
-}
-EXPORT_SYMBOL(adie_codec_powerup);
 
