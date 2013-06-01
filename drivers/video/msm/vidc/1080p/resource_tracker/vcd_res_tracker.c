@@ -25,7 +25,7 @@
 #include "vidc.h"
 #include "vcd_res_tracker.h"
 
-#define PIL_FW_BASE_ADDR 0xafe00000
+#define PIL_FW_BASE_ADDR 0x9fe00000
 #define PIL_FW_SIZE 0x200000
 
 static unsigned int vidc_clk_table[4] = {
@@ -86,9 +86,10 @@ static void *res_trk_pmem_map
 				&iova,
 				&buffer_size,
 				UNCACHED, 0);
-		if (ret) {
-			DDL_MSG_ERROR("%s():DDL ION client iommu map failed\n",
-						 __func__);
+		if (ret || !iova) {
+			DDL_MSG_ERROR(
+			"%s():DDL ION client iommu map failed, ret = %d iova = 0x%lx\n",
+			__func__, ret, iova);
 			goto ion_unmap_bail_out;
 		}
 		addr->mapped_buffer = NULL;
@@ -105,18 +106,18 @@ static void *res_trk_pmem_map
 				pr_err(" %s() alloced addres NULL", __func__);
 				goto bail_out;
 			}
-			flags = MSM_SUBSYSTEM_MAP_IOVA|MSM_SUBSYSTEM_MAP_KADDR;
+			flags = MSM_SUBSYSTEM_MAP_IOVA |
+				MSM_SUBSYSTEM_MAP_KADDR;
 			if (alignment == DDL_KILO_BYTE(128))
 					index = 1;
 			else if (alignment > SZ_4K)
 				flags |= MSM_SUBSYSTEM_ALIGN_IOVA_8K;
-
 			addr->mapped_buffer =
 			msm_subsystem_map_buffer(
 			(unsigned long)addr->alloced_phys_addr,
 			sz, flags, &restrk_mmu_subsystem[index],
-			sizeof(restrk_mmu_subsystem[index])
-			/sizeof(unsigned int));
+			sizeof(restrk_mmu_subsystem[index])/
+				sizeof(unsigned int));
 			if (IS_ERR(addr->mapped_buffer)) {
 				pr_err(" %s() buffer map failed", __func__);
 				goto bail_out;
@@ -126,13 +127,15 @@ static void *res_trk_pmem_map
 				pr_err("%s() map buffers failed\n", __func__);
 				goto bail_out;
 			}
-			addr->physical_base_addr = (u8 *)mapped_buffer->iova[0];
-			addr->virtual_base_addr = mapped_buffer->vaddr;
+			addr->physical_base_addr =
+				 (u8 *)mapped_buffer->iova[0];
+			addr->virtual_base_addr =
+					mapped_buffer->vaddr;
 		} else {
-			addr->physical_base_addr = (u8 *)
-					 addr->alloced_phys_addr;
-			addr->virtual_base_addr = (u8 *)
-					addr->alloced_phys_addr;
+			addr->physical_base_addr =
+				(u8 *) addr->alloced_phys_addr;
+			addr->virtual_base_addr =
+				(u8 *)addr->alloced_phys_addr;
 		}
 		addr->align_physical_addr = (u8 *) DDL_ALIGN((u32)
 		addr->physical_base_addr, alignment);
@@ -143,7 +146,7 @@ static void *res_trk_pmem_map
 	}
 	return addr->virtual_base_addr;
 bail_out:
-	if (addr->mapped_buffer)
+	if (IS_ERR(addr->mapped_buffer))
 		msm_subsystem_unmap_buffer(addr->mapped_buffer);
 	return NULL;
 ion_unmap_bail_out:
@@ -157,15 +160,22 @@ ion_bail_out:
 
 static void res_trk_pmem_free(struct ddl_buf_addr *addr)
 {
-	/*TODO: Enhance for pmem*/
 	struct ddl_context *ddl_context;
 	ddl_context = ddl_get_context();
 	if (ddl_context->video_ion_client) {
 		if (addr && addr->alloc_handle) {
-			ion_free(ddl_context->video_ion_client, addr->alloc_handle);
+			ion_free(ddl_context->video_ion_client,
+			 addr->alloc_handle);
 			addr->alloc_handle = NULL;
 		}
+	} else {
+		if (addr->mapped_buffer)
+			msm_subsystem_unmap_buffer(addr->mapped_buffer);
+		if (addr->alloced_phys_addr)
+			free_contiguous_memory_by_paddr(
+			(unsigned long)addr->alloced_phys_addr);
 	}
+	memset(addr, 0 , sizeof(struct ddl_buf_addr));
 }
 static int res_trk_pmem_alloc
 	(struct ddl_buf_addr *addr, size_t sz, u32 alignment)
@@ -183,28 +193,30 @@ static int res_trk_pmem_alloc
 	res_trk_set_mem_type(addr->mem_type);
 	alloc_size = (sz + alignment);
 	if (res_trk_get_enable_ion()) {
-		if (!res_trk_is_cp_enabled() || !res_trk_check_for_sec_session()) {
+		if (!res_trk_is_cp_enabled() ||
+			 !res_trk_check_for_sec_session()) {
 			if (!ddl_context->video_ion_client)
 				ddl_context->video_ion_client =
 					res_trk_get_ion_client();
 			if (!ddl_context->video_ion_client) {
-				DDL_MSG_ERROR("%s() :DDL ION Client Invalid handle\n",
-							 __func__);
+				DDL_MSG_ERROR(
+				"%s() :DDL ION Client Invalid handle\n",
+						__func__);
 				rc = -ENOMEM;
 				goto bail_out;
 			}
 			alloc_size = (alloc_size+4095) & ~4095;
 			addr->alloc_handle = ion_alloc(
-			ddl_context->video_ion_client, alloc_size, SZ_4K,
-				res_trk_get_mem_type());
+					ddl_context->video_ion_client,
+					 alloc_size, SZ_4K,
+					res_trk_get_mem_type());
 			if (IS_ERR_OR_NULL(addr->alloc_handle)) {
 				DDL_MSG_ERROR("%s() :DDL ION alloc failed\n",
-							 __func__);
+						__func__);
 				rc = -ENOMEM;
 				goto bail_out;
 			}
-		}
-		else {
+		} else {
 			addr->alloc_handle = NULL;
 			addr->alloced_phys_addr = PIL_FW_BASE_ADDR;
 			addr->buffer_size = sz;
@@ -216,6 +228,7 @@ static int res_trk_pmem_alloc
 		if (!addr->alloced_phys_addr) {
 			DDL_MSG_ERROR("%s() : acm alloc failed (%d)\n",
 					__func__, alloc_size);
+			rc = -ENOMEM;
 			goto bail_out;
 		}
 		addr->buffer_size = sz;
@@ -414,7 +427,9 @@ static u32 res_trk_vidc_pwr_up(void)
 		VCDRES_MSG_ERROR("Error : pm_runtime_get failed\n");
 		goto bail_out;
 	}
-	resource_context.footswitch = regulator_get(NULL, "fs_ved");
+	if (!resource_context.footswitch)
+		resource_context.footswitch =
+			regulator_get(NULL, "fs_ved");
 	if (IS_ERR(resource_context.footswitch)) {
 		VCDRES_MSG_ERROR("foot switch get failed\n");
 		resource_context.footswitch = NULL;
@@ -443,7 +458,8 @@ int res_trk_enable_footswitch(void)
 {
 	int rc = 0;
 	mutex_lock(&resource_context.lock);
-	resource_context.footswitch = regulator_get(NULL, "fs_ved");
+	if (!resource_context.footswitch)
+		resource_context.footswitch = regulator_get(NULL, "fs_ved");
 	if (IS_ERR(resource_context.footswitch)) {
 		VCDRES_MSG_ERROR("foot switch get failed\n");
 		resource_context.footswitch = NULL;
@@ -749,7 +765,7 @@ u32 res_trk_get_core_type(void){
 u32 res_trk_get_firmware_addr(struct ddl_buf_addr *firm_addr)
 {
 	int rc = 0;
-	size_t size= 0;
+	size_t size = 0;
 	if (!firm_addr || resource_context.firmware_addr.mapped_buffer) {
 		pr_err("%s() invalid params", __func__);
 		return -EINVAL;
@@ -777,7 +793,7 @@ u32 res_trk_get_firmware_addr(struct ddl_buf_addr *firm_addr)
 		goto fail_map;
 	}
 	memcpy(firm_addr, &resource_context.firmware_addr,
-			sizeof(struct ddl_buf_addr));
+		sizeof(struct ddl_buf_addr));
 	return 0;
 fail_map:
 	res_trk_pmem_free(&resource_context.firmware_addr);
@@ -821,15 +837,14 @@ int res_trk_get_mem_type(void)
 	}
 	if (resource_context.vidc_platform_data->enable_ion) {
 		if (res_trk_check_for_sec_session()) {
-         mem_type = ION_HEAP(mem_type);
-         if(resource_context.res_mem_type != DDL_FW_MEM)
-            mem_type |= ION_SECURE;
-         else if (res_trk_is_cp_enabled())
-            mem_type |= ION_SECURE;
-      }
-		else
-			mem_type = (ION_HEAP(mem_type) |
-					ION_HEAP(ION_IOMMU_HEAP_ID));
+			mem_type = ION_HEAP(mem_type);
+	if (resource_context.res_mem_type != DDL_FW_MEM)
+		mem_type |= ION_SECURE;
+	else if (res_trk_is_cp_enabled())
+		mem_type |= ION_SECURE;
+	} else
+		mem_type = (ION_HEAP(mem_type) |
+			ION_HEAP(ION_IOMMU_HEAP_ID));
 	}
 	return mem_type;
 }

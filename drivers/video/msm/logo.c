@@ -3,7 +3,6 @@
  * Show Logo in RLE 565 format
  *
  * Copyright (C) 2008 Google Incorporated
- *  KTG modified for Xperia 2011
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -47,7 +46,7 @@ static void memset32(void *_ptr, unsigned int val, unsigned count)
 }
 
 /* 565RLE image format: [count(2 bytes), rle(2 bytes)] */
-int load_565rle_image(char *filename)
+int load_565rle_image(char *filename, bool bf_supported)
 {
 	struct fb_info *info;
 	int fd, count, err = 0;
@@ -70,6 +69,7 @@ int load_565rle_image(char *filename)
 	}
 	count = sys_lseek(fd, (off_t)0, 2);
 	if (count <= 0) {
+		sys_close(fd);
 		err = -EIO;
 		goto err_logo_close_file;
 	}
@@ -87,9 +87,15 @@ int load_565rle_image(char *filename)
 
 	max = fb_width(info) * fb_height(info);
 	ptr = data;
+	if (bf_supported && (info->node == 1 || info->node == 2)) {
+		err = -EPERM;
+		pr_err("%s:%d no info->creen_base on fb%d!\n",
+		       __func__, __LINE__, info->node);
+		goto err_logo_free_data;
+	}
 	bits = (unsigned char *)(info->screen_base);
 	while (count > 3) {
-		unsigned int n = ptr[0];
+		unsigned n = ptr[0];
 		if (n > max)
 			break;
 

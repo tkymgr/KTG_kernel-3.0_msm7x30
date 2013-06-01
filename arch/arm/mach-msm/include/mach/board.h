@@ -339,13 +339,19 @@ enum msm_mdp_hw_revision {
 	MDP_REV_40,
 	MDP_REV_41,
 	MDP_REV_42,
+	MDP_REV_43,
+	MDP_REV_44,
 };
 
 struct msm_panel_common_pdata {
 	uintptr_t hw_revision_addr;
 	int gpio;
+	bool bl_lock;
+	spinlock_t bl_spinlock;
 	int (*backlight_level)(int level, int max, int min);
 	int (*pmic_backlight)(int level);
+	int (*rotate_panel)(void);
+	int (*backlight) (int level, int mode);
 	int (*panel_num)(void);
 	void (*panel_config_gpio)(int);
 	int (*vga_switch)(int select_vga);
@@ -361,6 +367,7 @@ struct msm_panel_common_pdata {
 	u32 ov1_wb_size;  /* overlay1 writeback size */
 	u32 mem_hid;
 	char cont_splash_enabled;
+	char mdp_iommu_split_domain;
 };
 
 
@@ -372,6 +379,7 @@ struct lcdc_platform_data {
 #ifdef CONFIG_MSM_BUS_SCALING
 	struct msm_bus_scale_pdata *bus_scale_table;
 #endif
+	int (*lvds_pixel_remap)(void);
 };
 
 struct tvenc_platform_data {
@@ -393,6 +401,7 @@ struct mipi_dsi_platform_data {
 	int (*dsi_power_save)(int on);
 	int (*dsi_client_reset)(void);
 	int (*get_lane_config)(void);
+	char (*splash_is_enabled)(void);
 	int target_type;
 };
 
@@ -415,7 +424,17 @@ struct mipi_dsi_panel_platform_data {
 	int fpga_3d_config_addr;
 	int *gpio;
 	struct mipi_dsi_phy_ctrl *phy_ctrl_settings;
+	char dlane_swap;
 	void (*dsi_pwm_cfg)(void);
+	char enable_wled_bl_ctrl;
+};
+
+struct lvds_panel_platform_data {
+	int *gpio;
+};
+
+struct msm_wfd_platform_data {
+	char (*wfd_check_mdp_iommu_split)(void);
 };
 
 #define PANEL_NAME_MAX_LEN 50
@@ -438,6 +457,23 @@ struct msm_hdmi_platform_data {
 	int (*gpio_config)(int on);
 	int (*init_irq)(void);
 	bool (*check_hdcp_hw_support)(void);
+	bool is_mhl_enabled;
+};
+
+struct msm_mhl_platform_data {
+	int irq;
+	/* GPIO no. for mhl intr */
+	uint32_t gpio_mhl_int;
+	/* GPIO no. for mhl block reset */
+	uint32_t gpio_mhl_reset;
+	/*
+	 * below gpios are specific to targets
+	 * that have the integrated MHL soln.
+	 */
+	/* GPIO no. for mhl block power */
+	uint32_t gpio_mhl_power;
+	/* GPIO no. for hdmi-mhl mux */
+	uint32_t gpio_hdmi_mhl_mux;
 };
 
 struct msm_i2c_platform_data {

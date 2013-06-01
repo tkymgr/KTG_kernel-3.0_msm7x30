@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2009, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -150,6 +150,18 @@ static int mddi_ext_probe(struct platform_device *pdev)
 
 	if ((pdev->id == 0) && (pdev->num_resources >= 0)) {
 		mddi_ext_pdata = pdev->dev.platform_data;
+		mddi_ext_clk = clk_get(NULL, "emdh_clk");
+		if (IS_ERR(mddi_ext_clk)) {
+			pr_err("can't find emdh_clk\n");
+			return PTR_ERR(mddi_ext_clk);
+		}
+		clk_enable(mddi_ext_clk);
+
+		mddi_ext_pclk = clk_get(NULL, "emdh_pclk");
+		if (IS_ERR(mddi_ext_pclk))
+			mddi_ext_pclk = NULL;
+		else
+			clk_enable(mddi_ext_pclk);
 
 		size =  resource_size(&pdev->resource[0]);
 		msm_emdh_base = ioremap(pdev->resource[0].start, size);
@@ -329,27 +341,8 @@ static int __init mddi_ext_driver_init(void)
 {
 	int ret;
 
-	mddi_ext_clk = clk_get(NULL, "emdh_clk");
-	if (IS_ERR(mddi_ext_clk)) {
-		printk(KERN_ERR "can't find emdh_clk\n");
-		return PTR_ERR(mddi_ext_clk);
-	}
-	clk_enable(mddi_ext_clk);
-
-	mddi_ext_pclk = clk_get(NULL, "emdh_pclk");
-	if (IS_ERR(mddi_ext_pclk))
-		mddi_ext_pclk = NULL;
-	else
-		clk_enable(mddi_ext_pclk);
-
 	ret = mddi_ext_register_driver();
 	if (ret) {
-		clk_disable(mddi_ext_clk);
-		clk_put(mddi_ext_clk);
-		if (mddi_ext_pclk) {
-			clk_disable(mddi_ext_pclk);
-			clk_put(mddi_ext_pclk);
-		}
 		printk(KERN_ERR "mddi_ext_register_driver() failed!\n");
 		return ret;
 	}

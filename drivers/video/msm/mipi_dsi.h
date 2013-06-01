@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2011, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -51,7 +51,8 @@
 #define MIPI_DSI_PANEL_QHD_PT 5
 #define MIPI_DSI_PANEL_WXGA	6
 #define MIPI_DSI_PANEL_WUXGA	7
-#define DSI_PANEL_MAX	7
+#define MIPI_DSI_PANEL_720P_PT	8
+#define DSI_PANEL_MAX	8
 
 enum {		/* mipi dsi panel */
 	DSI_VIDEO_MODE,
@@ -125,6 +126,7 @@ enum dsi_trigger_type {
 extern struct device dsi_dev;
 extern int mipi_dsi_clk_on;
 extern u32 dsi_irq;
+extern u32 esc_byte_ratio;
 
 extern void  __iomem *periph_base;
 extern char *mmss_cc_base;	/* mutimedia sub system clock control */
@@ -258,6 +260,8 @@ struct dsi_kickoff_action {
 char *mipi_dsi_buf_reserve_hdr(struct dsi_buf *dp, int hlen);
 char *mipi_dsi_buf_init(struct dsi_buf *dp);
 void mipi_dsi_init(void);
+void mipi_dsi_lane_cfg(void);
+void mipi_dsi_bist_ctrl(void);
 int mipi_dsi_buf_alloc(struct dsi_buf *, int size);
 int mipi_dsi_cmd_dma_add(struct dsi_buf *dp, struct dsi_cmd_desc *cm);
 int mipi_dsi_cmds_tx(struct msm_fb_data_type *mfd,
@@ -278,8 +282,6 @@ void mipi_dsi_cmd_bta_sw_trigger(void);
 void mipi_dsi_ack_err_status(void);
 void mipi_dsi_set_tear_on(struct msm_fb_data_type *mfd);
 void mipi_dsi_set_tear_off(struct msm_fb_data_type *mfd);
-void mipi_dsi_clk_enable(void);
-void mipi_dsi_clk_disable(void);
 void mipi_dsi_pre_kickoff_action(void);
 void mipi_dsi_post_kickoff_action(void);
 void mipi_dsi_pre_kickoff_add(struct dsi_kickoff_action *act);
@@ -293,15 +295,48 @@ void mipi_dsi_mdp_busy_wait(struct msm_fb_data_type *mfd);
 irqreturn_t mipi_dsi_isr(int irq, void *ptr);
 
 void mipi_set_tx_power_mode(int mode);
-void mipi_dsi_phy_ctrl(int on);
 void mipi_dsi_phy_init(int panel_ndx, struct msm_panel_info const *panel_info,
 	int target_type);
 int mipi_dsi_clk_div_config(uint8 bpp, uint8 lanes,
 			    uint32 *expected_dsi_pclk);
-void mipi_dsi_clk_init(struct platform_device *pdev);
+int mipi_dsi_clk_init(struct platform_device *pdev);
 void mipi_dsi_clk_deinit(struct device *dev);
+
+#ifdef CONFIG_FB_MSM_MIPI_DSI
+void mipi_dsi_clk_enable(void);
+void mipi_dsi_clk_disable(void);
+void mipi_dsi_prepare_clocks(void);
+void mipi_dsi_unprepare_clocks(void);
 void mipi_dsi_ahb_ctrl(u32 enable);
-void cont_splash_clk_ctrl(void);
+void mipi_dsi_phy_ctrl(int on);
+#else
+static inline void mipi_dsi_clk_enable(void)
+{
+	/* empty */
+}
+void mipi_dsi_clk_disable(void)
+{
+	/* empty */
+}
+void mipi_dsi_prepare_clocks(void)
+{
+	/* empty */
+}
+void mipi_dsi_unprepare_clocks(void)
+{
+	/* empty */
+}
+void mipi_dsi_ahb_ctrl(u32 enable)
+{
+	/* empty */
+}
+void mipi_dsi_phy_ctrl(int on)
+{
+	/* empty */
+}
+#endif
+
+void cont_splash_clk_ctrl(int enable);
 void mipi_dsi_turn_on_clks(void);
 void mipi_dsi_turn_off_clks(void);
 

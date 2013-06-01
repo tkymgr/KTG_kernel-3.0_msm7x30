@@ -5577,7 +5577,6 @@ static struct mmc_platform_data msm7x30_sdc4_data = {
 	.nonremovable = 0,
 };
 
-#if 0
 static int mmc_regulator_init(int sdcc_no, const char *supply, int uV)
 {
 	int rc;
@@ -5611,12 +5610,23 @@ out:
 	sdcc_vreg_data[sdcc_no] = NULL;
 	return rc;
 }
-#endif
+
 static void __init msm7x30_init_mmc(void)
 {
+#ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
+	if (mmc_regulator_init(3, "s3", 1800000))
+		goto out3;
+
+	msm_sdcc_setup_gpio(3, 1);
 	msm_add_sdcc(3, &msm7x30_sdc3_data);
+out3:
+#endif
+#ifdef CONFIG_MMC_MSM_SDC4_SUPPORT
+	if (mmc_regulator_init(4, "mmc", 2850000))
+		return;
 
 	msm_add_sdcc(4, &msm7x30_sdc4_data);
+#endif
 }
 
 static void __init msm7x30_init_nand(void)
@@ -5640,31 +5650,27 @@ static void __init msm7x30_init_nand(void)
 	}
 }
 
-
+#ifdef CONFIG_SERIAL_MSM_CONSOLE
 static struct msm_gpio uart3_config_data[] = {
-	{GPIO_CFG(53, 1, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
-		"UART3_Rx"},
-	{GPIO_CFG(54, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_4MA),
-		"UART3_Tx"},
+	{ GPIO_CFG(53, 1, GPIO_CFG_INPUT,   GPIO_CFG_PULL_UP, GPIO_CFG_2MA), "UART3_Rx"},
+	{ GPIO_CFG(54, 1, GPIO_CFG_OUTPUT,  GPIO_CFG_NO_PULL, GPIO_CFG_4MA), "UART3_Tx"},
 };
 
 static void msm7x30_init_uart3(void)
 {
 	msm_gpios_request_enable(uart3_config_data,
-				 ARRAY_SIZE(uart3_config_data));
+			ARRAY_SIZE(uart3_config_data));
 
 }
+#endif
 
+/* TSIF begin */
 #if defined(CONFIG_TSIF) || defined(CONFIG_TSIF_MODULE)
 
-#define TSIF_B_SYNC      GPIO_CFG(37, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
-#define TSIF_B_DATA      GPIO_CFG(36, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
-#define TSIF_B_EN        GPIO_CFG(35, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
-#define TSIF_B_CLK       GPIO_CFG(34, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
+#define TSIF_B_SYNC      GPIO_CFG(37, 1, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+#define TSIF_B_DATA      GPIO_CFG(36, 1, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+#define TSIF_B_EN        GPIO_CFG(35, 1, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+#define TSIF_B_CLK       GPIO_CFG(34, 1, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
 
 static const struct msm_gpio tsif_gpios[] = {
 	{ .gpio_cfg = TSIF_B_CLK,  .label =  "tsif_clk", },
@@ -5721,11 +5727,9 @@ static void __init mogami_temp_fixups(void)
 
 static void __init shared_vreg_on(void)
 {
-	vreg_helper_on(VREG_L20, 2800);
-//	vreg_helper_on(VREG_L20, 3050);
+	vreg_helper_on(VREG_L20, 3050);
 	vreg_helper_on(VREG_L10, 2600);
-	vreg_helper_on(VREG_L15, 2300);
-//	vreg_helper_on(VREG_L15, 2900);
+	vreg_helper_on(VREG_L15, 2900);
 	vreg_helper_on(VREG_L8, 1800);
 }
 
