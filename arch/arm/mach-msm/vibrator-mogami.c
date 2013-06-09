@@ -49,12 +49,13 @@ static spinlock_t vibe_lock;
 static enum vib_task vibe_state;
 static int long_vibe_time;
 
+/* Add newer versions at the top of array */
 static const uint32_t pm_rpc_versions[] = {
-	0x30001,
-	0x30002,
-	0x30003,
-	0x30004,
 	0x30005,
+	0x30004,
+	0x30003,
+	0x30002,
+	0x30001,
 };
 
 static void set_pmic_vibrator(void)

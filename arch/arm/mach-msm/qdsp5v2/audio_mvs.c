@@ -23,7 +23,7 @@
 #include <mach/msm_rpcrouter.h>
 
 #define MVS_PROG 0x30000014
-#define MVS_VERS 0x00030001
+#define MVS_VERS_COMP_VER3 0x00030001
 #define MVS_VERS_COMP_VER4 0x00040001
 #define MVS_VERS_COMP_VER5 0x00050001
 
@@ -331,6 +331,13 @@ struct audio_mvs_info_type {
 };
 
 static struct audio_mvs_info_type audio_mvs_info;
+
+/* Add newer versions at the top of array */
+static const unsigned int rpc_vers[] = {
+//	MVS_VERS_COMP_VER5,
+//	MVS_VERS_COMP_VER4,
+	MVS_VERS_COMP_VER3,
+};
 
 static int audio_mvs_setup_mode(struct audio_mvs_info_type *audio)
 {
@@ -1665,7 +1672,7 @@ struct miscdevice audio_mvs_misc = {
 
 static int __init audio_mvs_init(void)
 {
-	int rc;
+	int rc, i;
 
 	pr_info("%s:\n", __func__);
 
@@ -1690,47 +1697,22 @@ static int __init audio_mvs_init(void)
 		       WAKE_LOCK_IDLE,
 		       "audio_mvs_idle");
 
-	audio_mvs_info.rpc_endpt = msm_rpc_connect_compatible(MVS_PROG,
-					MVS_VERS_COMP_VER5,
-					MSM_RPC_UNINTERRUPTIBLE);
-
-	if (IS_ERR(audio_mvs_info.rpc_endpt)) {
-		pr_err("%s: MVS RPC connect failed ver 0x%x\n", __func__,
-				MVS_VERS_COMP_VER5);
+	for (i = 0; i < ARRAY_SIZE(rpc_vers); i++) {
 		audio_mvs_info.rpc_endpt = msm_rpc_connect_compatible(MVS_PROG,
-					MVS_VERS_COMP_VER4,
-					MSM_RPC_UNINTERRUPTIBLE);
+					rpc_vers[i], MSM_RPC_UNINTERRUPTIBLE);
 		if (IS_ERR(audio_mvs_info.rpc_endpt)) {
 			pr_err("%s: MVS RPC connect failed ver 0x%x\n",
-				__func__, MVS_VERS_COMP_VER4);
-			audio_mvs_info.rpc_endpt =
-				msm_rpc_connect_compatible(MVS_PROG,
-				MVS_VERS,
-				MSM_RPC_UNINTERRUPTIBLE);
-			if (IS_ERR(audio_mvs_info.rpc_endpt)) {
-				pr_err("%s: MVS RPC connect failed ver 0x%x\n",
-				   __func__, MVS_VERS);
-				rc = PTR_ERR(audio_mvs_info.rpc_endpt);
-				audio_mvs_info.rpc_endpt = NULL;
-				goto done;
-			} else {
-				pr_debug("%s: MVS RPC connect succeeded ver\
-					0x%x\n", __func__, MVS_VERS);
-				audio_mvs_info.rpc_prog = MVS_PROG;
-				audio_mvs_info.rpc_ver = MVS_VERS;
-			}
+				__func__, rpc_vers[i]);
+			audio_mvs_info.rpc_endpt = NULL;
 		} else {
-			pr_debug("%s: MVS RPC connect succeeded ver 0x%x\n",
-				__func__, MVS_VERS_COMP_VER4);
+			pr_debug("%s: MVS RPC connect succeeded ver\
+				0x%x\n", __func__, rpc_vers[i]);
 			audio_mvs_info.rpc_prog = MVS_PROG;
-			audio_mvs_info.rpc_ver = MVS_VERS_COMP_VER4;
+			audio_mvs_info.rpc_ver = rpc_vers[i];
+			break;
 		}
-	} else {
-		pr_debug("%s: MVS RPC connect succeeded ver 0x%x\n", __func__,
-			MVS_VERS_COMP_VER5);
-		audio_mvs_info.rpc_prog = MVS_PROG;
-		audio_mvs_info.rpc_ver = MVS_VERS_COMP_VER5;
 	}
+
 	audio_mvs_info.task = kthread_run(audio_mvs_thread,
 					  &audio_mvs_info,
 					  "audio_mvs");

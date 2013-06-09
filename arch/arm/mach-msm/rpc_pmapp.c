@@ -57,8 +57,8 @@ static struct msm_rpc_client *client;
 
 /* Add newer versions at the top of array */
 static const unsigned int rpc_vers[] = {
-	PMAPP_RPC_VER_7_1,
-	PMAPP_RPC_VER_6_1,
+//	PMAPP_RPC_VER_7_1,
+//	PMAPP_RPC_VER_6_1,
 	PMAPP_RPC_VER_5_1,
 	PMAPP_RPC_VER_3_1,
 	PMAPP_RPC_VER_2_1,
@@ -387,7 +387,7 @@ static int pmapp_rpc_req_reply(struct pmapp_buf *tbuf, struct pmapp_buf *rbuf,
 	if ((pm->endpoint == NULL) || IS_ERR(pm->endpoint)) {
 		for (i = 0; i < ARRAY_SIZE(rpc_vers); i++) {
 			pm->endpoint = msm_rpc_connect_compatible(
-					PMAPP_RPC_PROG,	rpc_vers[i], 0);
+					PMAPP_RPC_PROG,	rpc_vers[i], MSM_RPC_UNINTERRUPTIBLE);
 
 			if (IS_ERR(pm->endpoint)) {
 				ans  = PTR_ERR(pm->endpoint);
@@ -423,7 +423,7 @@ static int pmapp_rpc_req_reply(struct pmapp_buf *tbuf, struct pmapp_buf *rbuf,
 
 	if (len <= 0) {
 		printk(KERN_ERR "%s: rpc failed! len = %d\n", __func__, len);
-		pm->endpoint = NULL;	/* re-connect later ? */
+//		pm->endpoint = NULL;	/* re-connect later ? */
 		return len;
 	}
 

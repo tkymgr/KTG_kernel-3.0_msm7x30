@@ -502,6 +502,9 @@ static void handle_modem_crash(void)
 		msm_reset_hook();
 	*/
 
+	/* Make sure the data and buffers are all stored in memory */
+	flush_cache_all();
+
 	/* in this case the modem or watchdog should reboot us */
 	for (;;)
 		;
