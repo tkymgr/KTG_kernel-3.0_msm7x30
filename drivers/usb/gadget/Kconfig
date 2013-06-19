@@ -982,6 +982,14 @@ config USB_G_ANDROID
 	  The functions can be configured via a board file and may be
 	  enabled and disabled dynamically.
 
+config USB_ANDROID_GG
+        boolean "GordonsGate driver"
+        depends on USB_G_ANDROID
+        default n
+        help
+         Enabling this option adds GordonsGate support to the
+         android gadget.
+
 config USB_CDC_COMPOSITE
 	tristate "CDC Composite Device (Ethernet and ACM)"
 	depends on NET
@@ -1115,6 +1123,12 @@ config USB_MSC_PROFILING
 	help
 	  If you say Y here, support will be added for collecting
 	  Mass-storage performance numbers at the VFS level.
+
+config USB_KDDI_SCSI_EXTENSIONS
+	boolean "SCSI Command Extenstion for KDDI Device"
+	default n
+	help
+	 The mass storage extension to communicate with KDDI application.
 
 config MODEM_SUPPORT
 	boolean "modem support in generic serial function driver"

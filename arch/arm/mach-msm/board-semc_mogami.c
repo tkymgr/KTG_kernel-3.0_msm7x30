@@ -3623,7 +3623,7 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 	.chg_is_initialized	= bq24185_charger_initialized,
 #endif
 #if defined(CONFIG_CHARGER_BQ24185) && defined(CONFIG_USB_MSM_OTG_72K)
-	.vbus_drawable_ida	= USB_IDCHG_MAX,
+	.chg_drawable_ida	= USB_IDCHG_MAX,
 #endif
 };
 

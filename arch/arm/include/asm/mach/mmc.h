@@ -8,7 +8,6 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/sdio_func.h>
 #include <mach/gpio.h>
-#include <mach/msm_bus.h>
 
 #define SDC_DAT1_DISABLE 0
 #define SDC_DAT1_ENABLE  1
@@ -59,7 +58,8 @@ struct msm_mmc_reg_data {
  */
 struct msm_mmc_slot_reg_data {
 	struct msm_mmc_reg_data *vdd_data; /* keeps VDD/VCC regulator info */
-	struct msm_mmc_reg_data *vdd_io_data; /* keeps VDD IO regulator info */
+	struct msm_mmc_reg_data *vccq_data; /* keeps VCCQ regulator info */
+	struct msm_mmc_reg_data *vddp_data; /* keeps VDD Pad regulator info */
 };
 
 struct msm_mmc_gpio {
@@ -112,12 +112,6 @@ struct msm_mmc_pin_data {
 	struct msm_mmc_pad_data *pad_data;
 };
 
-struct msm_mmc_bus_voting_data {
-	struct msm_bus_scale_pdata *use_cases;
-	unsigned int *bw_vecs;
-	unsigned int bw_vecs_size;
-};
-
 struct mmc_platform_data {
 	unsigned int ocr_mask;			/* available voltages */
 	int built_in;				/* built-in device flag */
@@ -147,7 +141,7 @@ struct mmc_platform_data {
 	unsigned int msmsdcc_fmax;
 	bool nonremovable;
 	bool pclk_src_dfab;
-	unsigned int mpm_sdiowakeup_int;
+	int (*cfg_mpm_sdiowakeup)(struct device *, unsigned);
 	unsigned int wpswitch_gpio;
 	unsigned char wpswitch_polarity;
 	struct msm_mmc_slot_reg_data *vreg_data;
@@ -159,7 +153,6 @@ struct mmc_platform_data {
 	bool disable_runtime_pm;
 	bool disable_cmd23;
 	u32 swfi_latency;
-	struct msm_mmc_bus_voting_data *msm_bus_voting_data;
 };
 
 #endif
