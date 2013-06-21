@@ -11,19 +11,19 @@
  *
  * Adapted for SEMC 2011 devices by Vassilis Tsogkas (tsogkas@ceid.upatras.gr)
  */
-
 #include <linux/kernel.h>
-#include <linux/irq.h>
+#include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/gpio_event.h>
-#include <linux/platform_device.h>
+#include <linux/irq.h>
 #include <linux/delay.h>
-#include <linux/bootmem.h>
 #include <linux/io.h>
 #include <linux/spi/spi.h>
 #include <linux/msm_ssbi.h>
 #include <linux/mfd/pmic8058.h>
 #include <linux/leds.h>
+#include <linux/bootmem.h>
+#include <linux/msm_adc.h>
 #include <linux/mfd/marimba.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
@@ -32,31 +32,41 @@
 #include <linux/power_supply.h>
 #include <linux/leds-pmic8058.h>
 #include <linux/input/cy8c_ts.h>
-#include <linux/msm_adc.h>
 #ifdef CONFIG_FB_MSM_HDMI_SII9024A_PANEL
 #include <linux/uio_driver.h>
 #include <linux/i2c/sii9024.h>
 #endif /* CONFIG_FB_MSM_HDMI_SII9024A_PANEL */
 #include <linux/dma-mapping.h>
-#include <linux/regulator/consumer.h>
+#ifdef CONFIG_CHARGER_BQ24185
+#include <linux/i2c/bq24185_charger.h>
+#endif
+#ifdef CONFIG_CHARGER_BQ24160
+#include <linux/i2c/bq24160_charger.h>
+#endif
+
+#ifdef CONFIG_ANDROID_PMEM
+#include <linux/android_pmem.h>
+#endif
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/setup.h>
 
+#include <mach/dma.h>
 #include <mach/mpp.h>
 #include <mach/board.h>
 #include <mach/camera.h>
 #include <mach/memory.h>
 #include <mach/msm_iomap.h>
+#include <mach/msm_memtypes.h>
+#include <asm/mach/mmc.h>
+#include <mach/msm_battery.h>
 #include <mach/msm_hsusb.h>
 #include <mach/rpc_hsusb.h>
 #include <mach/msm_spi.h>
 #include <mach/qdsp5v2/msm_lpa.h>
 #include <mach/qdsp5v2/mi2s.h>
 #include <mach/qdsp5v2/audio_dev_ctl.h>
-#include <mach/dma.h>
-#include <linux/android_pmem.h>
 #include <mach/pmic.h>
 #include <mach/rpc_pmapp.h>
 #include <mach/qdsp5v2/aux_pcm.h>
@@ -64,22 +74,21 @@
 #include <mach/semc_battery_data.h>
 #include <mach/msm_tsif.h>
 
-#include <asm/mach/mmc.h>
 #include <asm/mach/flash.h>
 #include "devices.h"
 #include "timer.h"
 #include <mach/socinfo.h>
-#include "acpuclock.h"
 #include "board-semc_mogami-keypad.h"
 #include "board-semc_mogami-gpio.h"
-#include <mach/msm_memtypes.h>
-#include <linux/usb/android.h>
 #ifdef CONFIG_USB_G_ANDROID
+#include <linux/usb/android.h>
 #include <mach/usbdiag.h>
 #endif
+#include <linux/regulator/consumer.h>
 #include "pm.h"
-#include "pm-boot.h"
 #include "spm.h"
+#include "acpuclock.h"
+#include "pm-boot.h"
 #include <mach/dal_axi.h>
 #include <mach/msm_serial_hs.h>
 #include <mach/vreg.h>
@@ -99,7 +108,6 @@
 #include <linux/leds-as3676.h>
 #include "board-semc_mogami-leds.h"
 #include "board-semc_mogami-touch.h"
-#include <linux/i2c/bq24185_charger.h>
 #include <linux/i2c/bq27520_battery_semc.h>
 #ifdef CONFIG_INPUT_BMA150
 #include <linux/bma150.h>
@@ -2976,6 +2984,21 @@ static char *bq24185_supplied_to[] = {
 	SEMC_BDATA_NAME,
 };
 
+static int bq24185_gpio_configure(int enable)
+{
+	int rc = 0;
+
+	if (!!enable) {
+		rc = gpio_request(BQ24185_GPIO_IRQ, "bq24185");
+		if (rc)
+			pr_err("%s: gpio_requeset failed, "
+					"rc=%d\n", __func__, rc);
+	} else {
+		gpio_free(BQ24185_GPIO_IRQ);
+	}
+	return rc;
+}
+
 struct bq24185_platform_data bq24185_platform_data = {
 	.name = BQ24185_NAME,
 	.supplied_to = bq24185_supplied_to,
@@ -2985,11 +3008,12 @@ struct bq24185_platform_data bq24185_platform_data = {
 	/* Maximum battery regulation voltage = 4200mV */
 	.mbrv = BQ24185_MBRV_MV_4200,
 	/* Maximum charger current sense voltage = 71.4mV */
-	.mccsv = BQ24185_MCCSV_MV_6p8 | BQ24185_MCCSV_MV_27p2 |
+	.mccsv = BQ24185_MCCSV_MV_13p6 | BQ24185_MCCSV_MV_54p4 |
 		BQ24185_MCCSV_MV_37p4,
-#ifdef CONFIG_USB_MSM_OTG_72K
 	.notify_vbus_drop = msm_otg_notify_vbus_drop,
-#endif
+	.gpio_configure = bq24185_gpio_configure,
+	.vindpm_usb_compliant = VINDPM_4550MV,
+	.vindpm_non_compliant = VINDPM_4390MV,
 };
 
 static struct battery_regulation_vs_temperature id_bat_reg = {
@@ -3254,12 +3278,22 @@ static struct i2c_board_info msm_i2c_board_info[] = {
 		.platform_data = &bq27520_platform_data,
 		.type = BQ27520_NAME,
 	},
+#ifdef CONFIG_CHARGER_BQ24185
 	{
-		I2C_BOARD_INFO(BQ24185_NAME, 0xd6 >> 1),
+		I2C_BOARD_INFO(BQ24185_NAME, 0xD6 >> 1),
+		.irq = MSM_GPIO_TO_INT(BQ24185_GPIO_IRQ),
 		.platform_data = &bq24185_platform_data,
 		.type = BQ24185_NAME,
-		.irq = PM8058_GPIO_IRQ(PMIC8058_IRQ_BASE, BQ24185_GPIO_IRQ - 1),
 	},
+#endif
+#ifdef CONFIG_CHARGER_BQ24160
+	{
+		I2C_BOARD_INFO(BQ24160_NAME, 0xD6 >> 1),
+		.irq = MSM_GPIO_TO_INT(BQ24160_GPIO_IRQ),
+		.platform_data = &bq24160_platform_data,
+		.type = BQ24160_NAME,
+	},
+#endif
 #ifdef CONFIG_INPUT_BMA150
 	{ /* TODO: Remove? Added due to wrong bus connection on Anzu SP1. */
 		I2C_BOARD_INFO("bma150", 0x70 >> 1),
