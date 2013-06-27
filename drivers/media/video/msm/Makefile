@@ -29,3 +29,5 @@ obj-$(CONFIG_SEMC_SUB_CAMERA_MODULE) += semc_sub_camera_module.o
 obj-$(CONFIG_MSM_GEMINI) += msm_gemini_dev.o msm_gemini_sync.o msm_gemini_core.o msm_gemini_hw.o msm_gemini_platform.o
 obj-$(CONFIG_MSM_VPE) += msm_vpe1.o
 obj-$(CONFIG_MSM_VPE_STANDALONE) += msm_vpe1_standalone.o
+#obj-$(CONFIG_SEMC_VPE) += semc_vpe.o
+#obj-$(CONFIG_SEMC_VPE1) += semc_vpe1.o

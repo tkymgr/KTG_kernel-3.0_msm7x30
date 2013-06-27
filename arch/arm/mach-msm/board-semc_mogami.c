@@ -3166,52 +3166,59 @@ struct bma150_platform_data bma150_ng_platform_data = {
 #ifdef CONFIG_INPUT_BMA250
 static int bma250_gpio_setup(struct device *dev)
 {
-	return gpio_request(BMA250_GPIO, "bma250_irq");
+	return 0;
 }
 
 static void bma250_gpio_teardown(struct device *dev)
 {
-	gpio_free(BMA250_GPIO);
+	return;
+}
+
+static void bma250_hw_config(int enable)
+{
+	return;
+}
+
+static void bma250_power_mode(int enable)
+{
+	return;
 }
 
 static struct registers bma250_reg_setup = {
-	.range                = BMA250_RANGE_4G,
+	.range                = BMA250_RANGE_2G,
 	.bw_sel               = BMA250_BW_250HZ,
-	.int_mode_ctrl        = BMA250_MODE_SLEEP_50MS,
-	.int_enable1          = BMA250_INT_SLOPE_Z |
-				BMA250_INT_SLOPE_Y |
-				BMA250_INT_SLOPE_X |
-				BMA250_INT_ORIENT,
-	.int_enable2          = BMA250_INT_NEW_DATA,
-	.int_pin1             = BMA250_INT_PIN1_SLOPE |
-				BMA250_INT_PIN1_ORIENT,
-	.int_new_data         = BMA250_INT_PIN1,
-	.int_pin2             = -1,
 };
 
 static struct bma250_platform_data bma250_platform_data = {
 	.setup                = bma250_gpio_setup,
 	.teardown             = bma250_gpio_teardown,
+	.hw_config            = bma250_hw_config,
+	.power_mode           = bma250_power_mode,
 	.reg                  = &bma250_reg_setup,
+	.bypass_state         = mpu3050_bypassmode,
+	.read_axis_data       = bma250_read_axis_from_mpu3050,
+	.check_sleep_status   = check_bma250_sleep_state,
+	.vote_sleep_status    = vote_bma250_sleep_state,
+	.rate                 = BMA250_DEFAULT_RATE,
 };
 #endif
 
-#ifdef CONFIG_INPUT_APDS9702
-
 #define APDS9702_DOUT_GPIO   88
-#define APDS9702_VDD_VOLTAGE 2900
-#define APDS9702_WAIT_TIME   5000
 
 static int apds9702_gpio_setup(int request)
 {
-	if (request)
+	if (request) {
 		return gpio_request(APDS9702_DOUT_GPIO, "apds9702_dout");
-	gpio_free(APDS9702_DOUT_GPIO);
-	return 0;
+	} else {
+		gpio_free(APDS9702_DOUT_GPIO);
+		return 0;
+	}
 }
 
 static void apds9702_hw_config(int enable)
 {
+#define APDS9702_VDD_VOLTAGE 2900
+#define APDS9702_WAIT_TIME   5000
 	enable = !!enable;
 	if (enable)
 		vreg_helper_on("wlan", APDS9702_VDD_VOLTAGE);
@@ -3220,10 +3227,16 @@ static void apds9702_hw_config(int enable)
 	usleep(APDS9702_WAIT_TIME);
 }
 
+static void apds9702_power_mode(int enable)
+{
+	return;
+}
+
 static struct apds9702_platform_data apds9702_pdata = {
 	.gpio_dout      = APDS9702_DOUT_GPIO,
 	.is_irq_wakeup  = 1,
 	.hw_config      = apds9702_hw_config,
+	.power_mode     = apds9702_power_mode,
 	.gpio_setup     = apds9702_gpio_setup,
 	.ctl_reg = {
 		.trg   = 1,
@@ -3234,9 +3247,8 @@ static struct apds9702_platform_data apds9702_pdata = {
 		.th    = 15,
 		.rfilt = 0,
 	},
-	.phys_dev_path = "/sys/devices/i2c-0/0-0054",
+	.phys_dev_path = "/sys/devices/i2c-3/3-0054"
 };
-#endif
 
 static struct msm_gpio akm8975_gpio_config_data[] = {
 	{ GPIO_CFG(AKM8975_GPIO, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN,
