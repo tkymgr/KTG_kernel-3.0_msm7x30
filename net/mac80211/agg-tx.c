@@ -144,6 +144,14 @@ void ieee80211_assign_tid_tx(struct sta_info *sta, int tid,
 	rcu_assign_pointer(sta->ampdu_mlme.tid_tx[tid], tid_tx);
 }
 
+static void kfree_tid_tx(struct rcu_head *rcu_head)
+{
+	struct tid_ampdu_tx *tid_tx =
+	    container_of(rcu_head, struct tid_ampdu_tx, rcu_head);
+
+	kfree(tid_tx);
+}
+
 int ___ieee80211_stop_tx_ba_session(struct sta_info *sta, u16 tid,
 				    enum ieee80211_back_parties initiator,
 				    bool tx)
@@ -166,7 +174,7 @@ int ___ieee80211_stop_tx_ba_session(struct sta_info *sta, u16 tid,
 		/* not even started yet! */
 		ieee80211_assign_tid_tx(sta, tid, NULL);
 		spin_unlock_bh(&sta->lock);
-		kfree_rcu(tid_tx, rcu_head);
+		call_rcu(&tid_tx->rcu_head, kfree_tid_tx);
 		return 0;
 	}
 
@@ -325,7 +333,7 @@ void ieee80211_tx_ba_session_handle_start(struct sta_info *sta, int tid)
 		spin_unlock_bh(&sta->lock);
 
 		ieee80211_wake_queue_agg(local, tid);
-		kfree_rcu(tid_tx, rcu_head);
+		call_rcu(&tid_tx->rcu_head, kfree_tid_tx);
 		return;
 	}
 
@@ -364,7 +372,8 @@ int ieee80211_start_tx_ba_session(struct ieee80211_sta *pubsta, u16 tid,
 		return -EINVAL;
 
 	if ((tid >= STA_TID_NUM) ||
-	    !(local->hw.flags & IEEE80211_HW_AMPDU_AGGREGATION))
+	    !(local->hw.flags & IEEE80211_HW_AMPDU_AGGREGATION) ||
+	    (local->hw.flags & IEEE80211_HW_TX_AMPDU_IN_HW_ONLY))
 		return -EINVAL;
 
 #ifdef CONFIG_MAC80211_HT_DEBUG
@@ -710,7 +719,7 @@ void ieee80211_stop_tx_ba_cb(struct ieee80211_vif *vif, u8 *ra, u8 tid)
 
 	ieee80211_agg_splice_finish(local, tid);
 
-	kfree_rcu(tid_tx, rcu_head);
+	call_rcu(&tid_tx->rcu_head, kfree_tid_tx);
 
  unlock_sta:
 	spin_unlock_bh(&sta->lock);

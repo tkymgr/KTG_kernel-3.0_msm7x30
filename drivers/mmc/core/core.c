@@ -1970,17 +1970,8 @@ int mmc_suspend_host(struct mmc_host *host)
 	}
 	mmc_bus_put(host);
 
-#ifndef CONFIG_MACH_SDCC_TI_DRIVER
 	if (!err && !mmc_card_keep_power(host))
 		mmc_power_off(host);
-#else
-	if (!err) {
-		if (!mmc_card_keep_power(host))
-			mmc_power_off(host);
-		else
-			mmc_pm_keeppwr_control(host, 0);
-	}
-#endif
 	return err;
 }
 
@@ -2018,10 +2009,6 @@ int mmc_resume_host(struct mmc_host *host)
 				pm_runtime_enable(&host->card->dev);
 			}
 		}
-#ifdef CONFIG_MACH_SDCC_TI_DRIVER
-		else
-			mmc_pm_keeppwr_control(host, 1);
-#endif
 		BUG_ON(!host->bus_ops->resume);
 		err = host->bus_ops->resume(host);
 		if (err) {

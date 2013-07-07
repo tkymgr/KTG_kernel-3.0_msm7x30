@@ -118,7 +118,7 @@ int wl1271_ps_elp_wakeup(struct wl1271 *wl)
 			&compl, msecs_to_jiffies(WL1271_WAKEUP_TIMEOUT));
 		if (ret == 0) {
 			wl1271_error("ELP wakeup timeout!");
-			ieee80211_queue_work(wl->hw, &wl->recovery_work);
+			wl1271_queue_recovery_work(wl);
 			ret = -ETIMEDOUT;
 			goto err;
 		} else if (ret < 0) {
@@ -152,7 +152,10 @@ int wl1271_ps_set_mode(struct wl1271 *wl, enum wl1271_cmd_ps_mode mode,
 	case STATION_POWER_SAVE_MODE:
 		wl1271_debug(DEBUG_PSM, "entering psm");
 
-		ret = wl1271_acx_wake_up_conditions(wl);
+		ret = wl1271_acx_wake_up_conditions(wl,
+				    wl->conf.conn.wake_up_event,
+				    wl->conf.conn.listen_interval);
+
 		if (ret < 0) {
 			wl1271_error("couldn't set wake up conditions");
 			return ret;
@@ -169,9 +172,11 @@ int wl1271_ps_set_mode(struct wl1271 *wl, enum wl1271_cmd_ps_mode mode,
 		wl1271_debug(DEBUG_PSM, "leaving psm");
 
 		/* disable beacon early termination */
-		ret = wl1271_acx_bet_enable(wl, false);
-		if (ret < 0)
-			return ret;
+		if (wl->band == IEEE80211_BAND_2GHZ) {
+			ret = wl1271_acx_bet_enable(wl, false);
+			if (ret < 0)
+				return ret;
+		}
 
 		/* disable beacon filtering */
 		ret = wl1271_acx_beacon_filter_opt(wl, false);
@@ -191,24 +196,31 @@ int wl1271_ps_set_mode(struct wl1271 *wl, enum wl1271_cmd_ps_mode mode,
 
 static void wl1271_ps_filter_frames(struct wl1271 *wl, u8 hlid)
 {
-	int i, filtered = 0;
+	int i;
 	struct sk_buff *skb;
 	struct ieee80211_tx_info *info;
 	unsigned long flags;
+	int filtered[NUM_TX_QUEUES];
 
-	/* filter all frames currently the low level queus for this hlid */
+	/* filter all frames currently in the low level queues for this hlid */
 	for (i = 0; i < NUM_TX_QUEUES; i++) {
+		filtered[i] = 0;
 		while ((skb = skb_dequeue(&wl->links[hlid].tx_queue[i]))) {
+			filtered[i]++;
+
+			if (WARN_ON(wl12xx_is_dummy_packet(wl, skb)))
+				continue;
+
 			info = IEEE80211_SKB_CB(skb);
 			info->flags |= IEEE80211_TX_STAT_TX_FILTERED;
 			info->status.rates[0].idx = -1;
 			ieee80211_tx_status(wl->hw, skb);
-			filtered++;
 		}
 	}
 
 	spin_lock_irqsave(&wl->wl_lock, flags);
-	wl->tx_queue_count -= filtered;
+	for (i = 0; i < NUM_TX_QUEUES; i++)
+		wl->tx_queue_count[i] -= filtered[i];
 	spin_unlock_irqrestore(&wl->wl_lock, flags);
 
 	wl1271_handle_tx_low_watermark(wl);
@@ -221,8 +233,8 @@ void wl1271_ps_link_start(struct wl1271 *wl, u8 hlid, bool clean_queues)
 	if (test_bit(hlid, &wl->ap_ps_map))
 		return;
 
-	wl1271_debug(DEBUG_PSM, "start mac80211 PSM on hlid %d blks %d "
-		     "clean_queues %d", hlid, wl->links[hlid].allocated_blks,
+	wl1271_debug(DEBUG_PSM, "start mac80211 PSM on hlid %d pkts %d "
+		     "clean_queues %d", hlid, wl->links[hlid].allocated_pkts,
 		     clean_queues);
 
 	rcu_read_lock();

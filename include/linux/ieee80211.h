@@ -750,6 +750,12 @@ struct ieee80211_mgmt {
 					u8 action;
 					u8 smps_control;
 				} __attribute__ ((packed)) ht_smps;
+				struct {
+					u8 action;
+					u8 oui[3];
+					u8 variable[0];
+				} __attribute__ ((packed)) public;
+
 			} u;
 		} __attribute__ ((packed)) action;
 	} u;
@@ -766,6 +772,13 @@ struct ieee80211_mmie {
 	__le16 key_id;
 	u8 sequence_number[6];
 	u8 mic[8];
+} __attribute__ ((packed));
+
+struct ieee80211_vendor_ie {
+	u8 element_id;
+	u8 len;
+	u8 oui[3];
+	u8 oui_type;
 } __attribute__ ((packed));
 
 /* Control frames */
@@ -1305,7 +1318,6 @@ enum ieee80211_key_len {
 	WLAN_KEY_LEN_CCMP = 16,
 	WLAN_KEY_LEN_TKIP = 32,
 	WLAN_KEY_LEN_AES_CMAC = 16,
-	WLAN_KEY_LEN_WAPI_SMS4 = 32,
 };
 
 /**
@@ -1435,7 +1447,6 @@ enum ieee80211_sa_query_action {
 #define WLAN_CIPHER_SUITE_CCMP		0x000FAC04
 #define WLAN_CIPHER_SUITE_WEP104	0x000FAC05
 #define WLAN_CIPHER_SUITE_AES_CMAC	0x000FAC06
-#define WLAN_CIPHER_SUITE_SMS4		0x00147201
 
 /* AKM suite selectors */
 #define WLAN_AKM_SUITE_8021X		0x000FAC01
@@ -1446,6 +1457,9 @@ enum ieee80211_sa_query_action {
 #define WLAN_MAX_KEY_LEN		32
 
 #define WLAN_PMKID_LEN			16
+
+#define WLAN_OUI_WFA			0x506f9a
+#define WLAN_OUI_TYPE_WFA_P2P		9
 
 /**
  * ieee80211_get_qos_ctl - get pointer to qos control bytes

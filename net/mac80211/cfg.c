@@ -674,8 +674,11 @@ static void sta_apply_parameters(struct ieee80211_local *local,
 
 	if (mask & BIT(NL80211_STA_FLAG_WME)) {
 		sta->flags &= ~WLAN_STA_WME;
-		if (set & BIT(NL80211_STA_FLAG_WME))
+		sta->sta.wme = false;
+		if (set & BIT(NL80211_STA_FLAG_WME)) {
 			sta->flags |= WLAN_STA_WME;
+			sta->sta.wme = true;
+		}
 	}
 
 	if (mask & BIT(NL80211_STA_FLAG_MFP)) {
@@ -690,6 +693,9 @@ static void sta_apply_parameters(struct ieee80211_local *local,
 			sta->flags |= WLAN_STA_AUTH;
 	}
 	spin_unlock_irqrestore(&sta->flaglock, flags);
+
+	sta->sta.uapsd_queues = params->uapsd_queues;
+	sta->sta.max_sp = params->max_sp;
 
 	/*
 	 * cfg80211 validates this (1-2007) and allows setting the AID
@@ -780,7 +786,12 @@ static int ieee80211_add_station(struct wiphy *wiphy, struct net_device *dev,
 	if (!sta)
 		return -ENOMEM;
 
-	sta->flags = WLAN_STA_AUTH | WLAN_STA_ASSOC;
+	set_sta_flags(sta, WLAN_STA_AUTH);
+	if (params->sta_flags_mask & BIT(NL80211_STA_FLAG_PRE_ASSOC) &&
+	    params->sta_flags_set & BIT(NL80211_STA_FLAG_PRE_ASSOC))
+		sta->dummy = true;
+	else
+		set_sta_flags(sta, WLAN_STA_ASSOC);
 
 	sta_apply_parameters(local, sta, params);
 
@@ -818,6 +829,43 @@ static int ieee80211_del_station(struct wiphy *wiphy, struct net_device *dev,
 	return 0;
 }
 
+static int ieee80211_reinsert_pre_assoc(struct ieee80211_sub_if_data *sdata,
+					u8 *mac)
+{
+	struct sta_info *sta;
+	int err;
+
+	mutex_lock(&sdata->local->sta_mtx);
+	/*
+	 * station info was already allocated and inserted before
+	 * the association and should be available to us
+	 */
+	sta = sta_info_get_rx(sdata, mac);
+	if (WARN_ON(!sta)) {
+		mutex_unlock(&sdata->local->sta_mtx);
+		return -ENOENT;
+	}
+
+	if (!sta->dummy) {
+		/* sta was already reinserted */
+		mutex_unlock(&sdata->local->sta_mtx);
+		return 0;
+	}
+
+	/* sta is not associated */
+	set_sta_flags(sta, WLAN_STA_ASSOC);
+
+	/* sta_info_reinsert will also unlock the mutex lock */
+	err = sta_info_reinsert(sta);
+	sta = NULL;
+	if (err) {
+		printk(KERN_DEBUG "%s: failed to insert STA entry for"
+		       " the AP (error %d)\n", sdata->name, err);
+		return err;
+	}
+	return 0;
+
+}
 static int ieee80211_change_station(struct wiphy *wiphy,
 				    struct net_device *dev,
 				    u8 *mac,
@@ -827,10 +875,11 @@ static int ieee80211_change_station(struct wiphy *wiphy,
 	struct ieee80211_local *local = wiphy_priv(wiphy);
 	struct sta_info *sta;
 	struct ieee80211_sub_if_data *vlansdata;
+	bool is_dummy = false;
 
 	rcu_read_lock();
 
-	sta = sta_info_get_bss(sdata, mac);
+	sta = sta_info_get_bss_rx(sdata, mac);
 	if (!sta) {
 		rcu_read_unlock();
 		return -ENOENT;
@@ -858,9 +907,16 @@ static int ieee80211_change_station(struct wiphy *wiphy,
 		ieee80211_send_layer2_update(sta);
 	}
 
+	if (sta->dummy)
+		is_dummy = true;
+
 	sta_apply_parameters(local, sta, params);
 
 	rcu_read_unlock();
+	if (is_dummy &&
+	    (params->sta_flags_mask & BIT(NL80211_STA_FLAG_PRE_ASSOC)) &&
+	    !(params->sta_flags_set & BIT(NL80211_STA_FLAG_PRE_ASSOC)))
+		ieee80211_reinsert_pre_assoc(sdata, mac);
 
 	if (sdata->vif.type == NL80211_IFTYPE_STATION &&
 	    params->sta_flags_mask & BIT(NL80211_STA_FLAG_AUTHORIZED))
@@ -1161,6 +1217,34 @@ static int ieee80211_leave_mesh(struct wiphy *wiphy, struct net_device *dev)
 }
 #endif
 
+static int ieee80211_set_probe_resp(struct ieee80211_sub_if_data *sdata,
+				    u8 *resp, size_t resp_len)
+{
+	struct sk_buff *new, *old;
+
+	old = sdata->u.ap.probe_resp;
+
+	if (!resp || !resp_len)
+		return -EINVAL;
+
+	new = dev_alloc_skb(resp_len);
+	if (!new) {
+		printk(KERN_DEBUG "%s: failed to allocate buffer for probe "
+		       "response template\n", sdata->name);
+		return -ENOMEM;
+	}
+
+	memcpy(skb_put(new, resp_len), resp, resp_len);
+
+	rcu_assign_pointer(sdata->u.ap.probe_resp, new);
+	synchronize_rcu();
+
+	if (old)
+		dev_kfree_skb(old);
+
+	return 0;
+}
+
 static int ieee80211_change_bss(struct wiphy *wiphy,
 				struct net_device *dev,
 				struct bss_parameters *params)
@@ -1223,6 +1307,20 @@ static int ieee80211_change_bss(struct wiphy *wiphy,
 		changed |= BSS_CHANGED_HT;
 	}
 
+	if (params->ssid_len > 0) {
+		memcpy(sdata->vif.bss_conf.ssid, params->ssid,
+		       params->ssid_len);
+		sdata->vif.bss_conf.ssid_len = params->ssid_len;
+		changed |= BSS_CHANGED_SSID;
+	}
+
+	if (params->probe_resp_len > 0) {
+		int ret = ieee80211_set_probe_resp(sdata, params->probe_resp,
+						   params->probe_resp_len);
+		if (!ret)
+			changed |= BSS_CHANGED_AP_PROBE_RESP;
+	}
+
 	ieee80211_bss_info_change_notify(sdata, changed);
 
 	return 0;
@@ -1249,6 +1347,10 @@ static int ieee80211_set_txq_params(struct wiphy *wiphy,
 	 */
 	p.uapsd = false;
 
+	if (params->queue >= local->hw.queues)
+		return -EINVAL;
+
+	local->tx_conf[params->queue] = p;
 	if (drv_conf_tx(local, params->queue, &p)) {
 		wiphy_debug(local->hw.wiphy,
 			    "failed to set TX queue parameters for queue %d\n",
@@ -1377,6 +1479,13 @@ ieee80211_sched_scan_stop(struct wiphy *wiphy, struct net_device *dev)
 		return -EOPNOTSUPP;
 
 	return ieee80211_request_sched_scan_stop(sdata);
+}
+
+static void ieee80211_scan_cancel_req(struct wiphy *wiphy,
+					struct net_device *dev)
+{
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	ieee80211_scan_cancel(sdata->local);
 }
 
 static int ieee80211_auth(struct wiphy *wiphy, struct net_device *dev,
@@ -1810,7 +1919,8 @@ static int ieee80211_mgmt_tx(struct wiphy *wiphy, struct net_device *dev,
 			     struct ieee80211_channel *chan, bool offchan,
 			     enum nl80211_channel_type channel_type,
 			     bool channel_type_valid, unsigned int wait,
-			     const u8 *buf, size_t len, u64 *cookie)
+			     const u8 *buf, size_t len, bool no_cck,
+			     u64 *cookie)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_local *local = sdata->local;
@@ -1836,6 +1946,9 @@ static int ieee80211_mgmt_tx(struct wiphy *wiphy, struct net_device *dev,
 		is_offchan = false;
 		flags |= IEEE80211_TX_CTL_TX_OFFCHAN;
 	}
+
+	if (no_cck)
+		flags |= IEEE80211_TX_CTL_NO_CCK_RATE;
 
 	if (is_offchan && !offchan)
 		return -EBUSY;
@@ -2120,6 +2233,7 @@ struct cfg80211_ops mac80211_config_ops = {
 	.suspend = ieee80211_suspend,
 	.resume = ieee80211_resume,
 	.scan = ieee80211_scan,
+	.scan_cancel = ieee80211_scan_cancel_req,
 	.sched_scan_start = ieee80211_sched_scan_start,
 	.sched_scan_stop = ieee80211_sched_scan_stop,
 	.auth = ieee80211_auth,

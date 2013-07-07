@@ -274,9 +274,7 @@ static int wl1271_boot_upload_nvs(struct wl1271 *wl)
 		 */
 		if (wl->nvs_len == sizeof(struct wl1271_nvs_file) ||
 		    wl->nvs_len == WL1271_INI_LEGACY_NVS_FILE_SIZE) {
-			/* for now 11a is unsupported in AP mode */
-			if (wl->bss_type != BSS_TYPE_AP_BSS &&
-			    nvs->general_params.dual_mode_select)
+			if (nvs->general_params.dual_mode_select)
 				wl->enable_11a = true;
 		}
 
@@ -470,22 +468,32 @@ static int wl1271_boot_run_firmware(struct wl1271 *wl)
 	 * ready to receive event from the command mailbox
 	 */
 
+	/* TODO: when removing a role, mask the appropriate events */
+
 	/* unmask required mbox events  */
 	wl->event_mask = BSS_LOSE_EVENT_ID |
 		SCAN_COMPLETE_EVENT_ID |
 		PS_REPORT_EVENT_ID |
-		JOIN_EVENT_COMPLETE_ID |
 		DISCONNECT_EVENT_COMPLETE_ID |
 		RSSI_SNR_TRIGGER_0_EVENT_ID |
 		PSPOLL_DELIVERY_FAILURE_EVENT_ID |
 		SOFT_GEMINI_SENSE_EVENT_ID |
+		CHANGE_AUTO_MODE_TIMEOUT_EVENT_ID |
 		PERIODIC_SCAN_REPORT_EVENT_ID |
-		PERIODIC_SCAN_COMPLETE_EVENT_ID;
+		PERIODIC_SCAN_COMPLETE_EVENT_ID |
+		DUMMY_PACKET_EVENT_ID |
+		REMAIN_ON_CHANNEL_COMPLETE_EVENT_ID |
+		BA_SESSION_RX_CONSTRAINT_EVENT_ID;
 
+	/* TODO: mode can change dynamically. make it more sane */
+	wl->event_mask |= PEER_REMOVE_COMPLETE_EVENT_ID;
+
+	/* TODO: there's a bug in MAX_TX_RETRY_EVENT_ID in STA mode */
 	if (wl->bss_type == BSS_TYPE_AP_BSS)
-		wl->event_mask |= STA_REMOVE_COMPLETE_EVENT_ID;
+		wl->event_mask |= MAX_TX_RETRY_EVENT_ID |
+				  INACTIVE_STA_EVENT_ID;
 	else
-		wl->event_mask |= DUMMY_PACKET_EVENT_ID;
+		wl->event_mask |= CHANNEL_SWITCH_COMPLETE_EVENT_ID;
 
 	ret = wl1271_event_unmask(wl);
 	if (ret < 0) {
@@ -516,13 +524,13 @@ static void wl1271_boot_hw_version(struct wl1271 *wl)
 {
 	u32 fuse;
 
-	fuse = wl1271_top_reg_read(wl, REG_FUSE_DATA_2_1);
+	if (wl->chip.id == CHIP_ID_1283_PG20)
+		fuse = wl1271_top_reg_read(wl, WL128X_REG_FUSE_DATA_2_1);
+	else
+		fuse = wl1271_top_reg_read(wl, WL127X_REG_FUSE_DATA_2_1);
 	fuse = (fuse & PG_VER_MASK) >> PG_VER_OFFSET;
 
 	wl->hw_pg_ver = (s8)fuse;
-
-	if (((wl->hw_pg_ver & PG_MAJOR_VER_MASK) >> PG_MAJOR_VER_OFFSET) < 3)
-		wl->quirks |= WL12XX_QUIRK_END_OF_TRANSACTION;
 }
 
 static int wl128x_switch_tcxo_to_fref(struct wl1271 *wl)
@@ -663,7 +671,8 @@ static int wl127x_boot_clk(struct wl1271 *wl)
 	u32 pause;
 	u32 clk;
 
-	wl1271_boot_hw_version(wl);
+	if (((wl->hw_pg_ver & PG_MAJOR_VER_MASK) >> PG_MAJOR_VER_OFFSET) < 3)
+		wl->quirks |= WL12XX_QUIRK_END_OF_TRANSACTION;
 
 	if (wl->ref_clock == CONF_REF_CLK_19_2_E ||
 	    wl->ref_clock == CONF_REF_CLK_38_4_E ||
@@ -717,6 +726,8 @@ int wl1271_load_firmware(struct wl1271 *wl)
 	u32 tmp, clk;
 	int selected_clock = -1;
 
+	wl1271_boot_hw_version(wl);
+
 	if (wl->chip.id == CHIP_ID_1283_PG20) {
 		ret = wl128x_boot_clk(wl, &selected_clock);
 		if (ret < 0)
@@ -747,6 +758,9 @@ int wl1271_load_firmware(struct wl1271 *wl)
 	} else {
 		clk |= (wl->ref_clock << 1) << 4;
 	}
+
+	if (wl->quirks & WL12XX_QUIRK_LPD_MODE)
+		clk |= SCRATCH_ENABLE_LPD;
 
 	wl1271_write32(wl, DRPW_SCRATCH_START, clk);
 

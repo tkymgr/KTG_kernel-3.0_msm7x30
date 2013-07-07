@@ -401,8 +401,10 @@ static int __devinit wl1271_probe(struct spi_device *spi)
 		goto out_free;
 	}
 
-	wl->ref_clock = pdata->board_ref_clock;
-	wl->tcxo_clock = pdata->board_tcxo_clock;
+	if (wl->ref_clock < 0)
+		wl->ref_clock = pdata->board_ref_clock;
+	if (wl->tcxo_clock < 0)
+		wl->tcxo_clock = pdata->board_tcxo_clock;
 	wl->platform_quirks = pdata->platform_quirks;
 
 	if (wl->platform_quirks & WL12XX_PLATFORM_QUIRK_EDGE_IRQ)
@@ -434,8 +436,6 @@ static int __devinit wl1271_probe(struct spi_device *spi)
 	ret = wl1271_register_hw(wl);
 	if (ret)
 		goto out_irq;
-
-	wl1271_notice("initialized");
 
 	return 0;
 
@@ -473,23 +473,12 @@ static struct spi_driver wl1271_spi_driver = {
 
 static int __init wl1271_init(void)
 {
-	int ret;
-
-	ret = spi_register_driver(&wl1271_spi_driver);
-	if (ret < 0) {
-		wl1271_error("failed to register spi driver: %d", ret);
-		goto out;
-	}
-
-out:
-	return ret;
+	return spi_register_driver(&wl1271_spi_driver);
 }
 
 static void __exit wl1271_exit(void)
 {
 	spi_unregister_driver(&wl1271_spi_driver);
-
-	wl1271_notice("unloaded");
 }
 
 module_init(wl1271_init);
@@ -500,6 +489,4 @@ MODULE_AUTHOR("Luciano Coelho <coelho@ti.com>");
 MODULE_AUTHOR("Juuso Oikarinen <juuso.oikarinen@nokia.com>");
 MODULE_FIRMWARE(WL1271_FW_NAME);
 MODULE_FIRMWARE(WL128X_FW_NAME);
-MODULE_FIRMWARE(WL127X_AP_FW_NAME);
-MODULE_FIRMWARE(WL128X_AP_FW_NAME);
 MODULE_ALIAS("spi:wl1271");
