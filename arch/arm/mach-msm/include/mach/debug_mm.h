@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,9 +22,11 @@
 
 #define MM_DBG(fmt, args...) pr_debug("[%s] " fmt,\
 		__func__, ##args)
-
+/*
 #define MM_INFO(fmt, args...) pr_info("[%s:%s] " fmt,\
 	       __MM_FILE__, __func__, ##args)
+*/
+#define MM_INFO(fmt, args...)
 
 #define MM_ERR(fmt, args...) pr_err("[%s:%s] " fmt,\
 	       __MM_FILE__, __func__, ##args)

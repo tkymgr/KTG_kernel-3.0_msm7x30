@@ -43,6 +43,12 @@
 #ifdef CONFIG_CHARGER_BQ24160
 #include <linux/i2c/bq24160_charger.h>
 #endif
+#include <mach/semc_battery_data.h>
+#include <mach/msm72k_otg.h>
+#include <mach/semc_charger_usb.h>
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+#include <mach/semc_charger_cradle.h>
+#endif
 
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
@@ -71,7 +77,6 @@
 #include <mach/rpc_pmapp.h>
 #include <mach/qdsp5v2/aux_pcm.h>
 #include <mach/semc_rpc_server_handset.h>
-#include <mach/semc_battery_data.h>
 #include <mach/msm_tsif.h>
 
 #include <asm/mach/flash.h>
@@ -225,9 +230,6 @@
 #if defined(CONFIG_LM3560) || defined(CONFIG_LM3561)
 #include <linux/lm356x.h>
 #define LM356X_HW_RESET_GPIO 2
-#endif
-#ifdef CONFIG_USB_MSM_OTG_72K
-#include <mach/msm72k_otg.h>
 #endif
 
 #ifdef CONFIG_SEMC_ONESEG_TUNER_PM
@@ -3032,7 +3034,6 @@ static struct battery_chargalg_platform_data battery_chargalg_platform_data = {
 	.name = BATTERY_CHARGALG_NAME,
 	.supplied_to = battery_chargalg_supplied_to,
 	.num_supplicants = ARRAY_SIZE(battery_chargalg_supplied_to),
-	.overvoltage_max_design = 4225,
 	.id_bat_reg = &id_bat_reg,
 	.ext_eoc_recharge_enable = 1,
 	.temp_hysteresis_design = 3,
@@ -3047,12 +3048,42 @@ static struct battery_chargalg_platform_data battery_chargalg_platform_data = {
 	.set_charger_current = bq24185_set_charger_current,
 	.set_input_current_limit = bq24185_set_input_current_limit,
 	.set_charging_status = bq24185_set_ext_charging_status,
-#endif
-	.get_supply_current_limit = hsusb_get_chg_current_ma,
-	.allow_dynamic_charge_current_ctrl = 1,
+	.get_supply_current_limit = NULL,
+//	.get_restrict_ctl = NULL,
+//	.get_restricted_setting = NULL,
+//	.setup_exchanged_power_supply = NULL,
 	.charge_set_current_1 = 350,
 	.charge_set_current_2 = 550,
 	.charge_set_current_3 = 750,
+	.overvoltage_max_design = 4225,
+#endif
+#ifdef CONFIG_CHARGER_BQ24160
+	.turn_on_charger = bq24160_turn_on_charger,
+	.turn_off_charger = bq24160_turn_off_charger,
+	.set_charger_voltage = bq24160_set_charger_voltage,
+	.set_charger_current = bq24160_set_charger_current,
+	.set_input_current_limit = bq24160_set_input_current_limit,
+	.set_charging_status = bq24160_set_ext_charging_status,
+	.get_supply_current_limit = NULL,
+	.get_restrict_ctl = bq24160_is_restricted_by_charger_revision,
+	.get_restricted_setting = bq24160_get_restricted_setting,
+	.setup_exchanged_power_supply = bq24160_setup_exchanged_power_supply,
+	.charge_set_current_1 = 350,
+	.charge_set_current_2 = 575,
+	.charge_set_current_3 = 725,
+	.overvoltage_max_design = 4245,
+#endif
+#ifdef CONFIG_SEMC_CHARGER_USB_ARCH
+	.get_supply_current_limit = semc_charger_usb_current_ma,
+#endif
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	.get_ac_online_status = semc_charger_get_ac_online_status,
+	.set_input_current_limit_dual = bq24160_set_input_current_limit_dual,
+	.set_input_voltage_dpm_usb = bq24160_set_input_voltage_dpm_usb,
+	.set_input_voltage_dpm_cradle = bq24160_set_input_voltage_dpm_in,
+	.get_supply_current_limit_cradle = semc_charger_cradle_current_ma,
+#endif
+	.allow_dynamic_charge_current_ctrl = 1,
 	.average_current_min_limit = -1,
 	.average_current_max_limit = 250,
 };
@@ -3633,11 +3664,12 @@ static struct msm_usb_host_platform_data msm_usb_host_pdata = {
 	.power_budget = 300,
 };
 
-/* Driver(s) to be notified upon change in USB */
-static char *hsusb_chg_supplied_to[] = {
+#ifdef CONFIG_SEMC_CHARGER_USB_ARCH
+static char *semc_chg_usb_supplied_to[] = {
 	BATTERY_CHARGALG_NAME,
 	BQ27520_NAME,
 };
+#endif
 
 static int hs_drv_ampl_ratio[] = {
 	HS_DRV_AMPLITUDE_DEFAULT,
@@ -3651,26 +3683,35 @@ static int hs_drv_ampl_ratio[] = {
 static int msm_hsusb_pmic_notif_init(void (*callback)(int online), int init);
 #endif
 static struct msm_otg_platform_data msm_otg_pdata = {
+	/* if usb link is in sps there is no need for
+	 * usb pclk as dayatona fabric clock will be
+	 * used instead
+	 */
+	.pemp_level		 = PRE_EMPHASIS_WITH_20_PERCENT,
+	.cdr_autoreset		 = CDR_AUTO_RESET_DISABLE,
+	.se1_gating		 = SE1_GATING_DISABLE,
+	.bam_disable		 = 1,
 	.rpc_connect = hsusb_rpc_connect,
-
-#ifndef CONFIG_USB_EHCI_MSM_72K
-	.pmic_vbus_notif_init         = msm_hsusb_pmic_notif_init,
-#else
+#ifdef CONFIG_USB_EHCI_MSM_72K
 	.vbus_power = msm_hsusb_vbus_power,
 #endif
-	.pemp_level = PRE_EMPHASIS_WITH_20_PERCENT,
-	.cdr_autoreset = CDR_AUTO_RESET_DISABLE,
 	.drv_ampl = HS_DRV_AMPLITUDE_DEFAULT,
-	.se1_gating		= SE1_GATING_DISABLE,
-	.chg_vbus_draw		= hsusb_chg_vbus_draw,
-	.chg_connected		= hsusb_chg_connected,
-	.chg_init		= hsusb_chg_init,
-#ifdef CONFIG_CHARGER_BQ24185
-	.chg_is_initialized	= bq24185_charger_initialized,
+#ifdef CONFIG_SEMC_CHARGER_USB_ARCH
+	.chg_vbus_draw               = semc_charger_usb_vbus_draw,
+	.chg_connected               = semc_charger_usb_connected,
+	.chg_init               = semc_charger_usb_init,
 #endif
-#if defined(CONFIG_CHARGER_BQ24185) && defined(CONFIG_USB_MSM_OTG_72K)
-	.chg_drawable_ida	= USB_IDCHG_MAX,
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	.is_cradle_connected	 = semc_charger_cradle_is_connected,
 #endif
+#if defined(CONFIG_CHARGER_BQ24185)
+	.chg_is_initialized	 = bq24185_charger_initialized,
+#elif defined(CONFIG_CHARGER_BQ24160)
+	.chg_is_initialized	 = bq24160_charger_initialized,
+#endif
+//	.pmic_vbus_notif_init	 = msm_hsusb_pmic_notif_init,
+	.phy_can_powercollapse	 = 1,
+	.chg_drawable_ida	 	= USB_IDCHG_MAX,
 };
 
 #ifdef CONFIG_USB_GADGET
@@ -4760,8 +4801,10 @@ static void __init msm7x30_init(void)
 		pr_debug("%s: SOC Version:2.(1 or more)\n", __func__);
 		msm_otg_pdata.ldo_set_voltage = 0;
 	}
-	hsusb_chg_set_supplicants(hsusb_chg_supplied_to,
-				  ARRAY_SIZE(hsusb_chg_supplied_to));
+#ifdef CONFIG_SEMC_CHARGER_USB_ARCH
+	semc_chg_usb_set_supplicants(semc_chg_usb_supplied_to,
+				  ARRAY_SIZE(semc_chg_usb_supplied_to));
+#endif
 	if (0 <= CONFIG_USB_HS_DRV_AMPLITUDE ||
 		CONFIG_USB_HS_DRV_AMPLITUDE < ARRAY_SIZE(hs_drv_ampl_ratio))
 		msm_otg_pdata.drv_ampl =
