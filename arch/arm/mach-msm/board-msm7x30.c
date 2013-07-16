@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -95,26 +95,10 @@
 
 #define MSM_PMEM_SF_SIZE	0x1700000
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
-#define MSM_FB_PRIM_BUF_SIZE   (864 * 480 * 4 * 3) /* 4bpp * 3 Pages */
+#define MSM_FB_SIZE            0x780000
 #else
-#define MSM_FB_PRIM_BUF_SIZE   (864 * 480 * 4 * 2) /* 4bpp * 2 Pages */
+#define MSM_FB_SIZE            0x500000
 #endif
-
-#ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL
-#define MSM_FB_EXT_BUF_SIZE (1280 * 720 * 2 * 1) /* 2 bpp x 1 page */
-#else
-#define MSM_FB_EXT_BUF_SIZE    0
-#endif
-
-#ifdef CONFIG_FB_MSM_OVERLAY0_WRITEBACK
-/* width x height x 3 bpp x 2 frame buffer */
-#define MSM_FB_OVERLAY0_WRITEBACK_SIZE roundup((864 * 480 * 3 * 2), 4096)
-#else
-#define MSM_FB_OVERLAY0_WRITEBACK_SIZE  0
-#endif
-
-#define MSM_FB_SIZE roundup(MSM_FB_PRIM_BUF_SIZE + MSM_FB_EXT_BUF_SIZE, 4096)
-
 #define MSM_PMEM_ADSP_SIZE      0x1E00000
 #define MSM_FLUID_PMEM_ADSP_SIZE	0x2800000
 #define PMEM_KERNEL_EBI0_SIZE   0x600000
@@ -4360,7 +4344,6 @@ static struct msm_panel_common_pdata mdp_pdata = {
 	.mdp_core_clk_table = mdp_core_clk_rate_table,
 	.num_mdp_clk = ARRAY_SIZE(mdp_core_clk_rate_table),
 	.mdp_rev = MDP_REV_40,
-	.mem_hid = MEMTYPE_EBI0,
 };
 
 static int lcd_panel_spi_gpio_num[] = {
@@ -6093,7 +6076,9 @@ static struct mmc_platform_data msm7x30_sdc3_data = {
 	.ocr_mask	= MMC_VDD_27_28 | MMC_VDD_28_29,
 	.translate_vdd	= msm_sdcc_setup_power,
 	.mmc_bus_width  = MMC_CAP_4_BIT_DATA,
+#ifdef CONFIG_MMC_MSM_SDIO_SUPPORT
 	.sdiowakeup_irq = MSM_GPIO_TO_INT(118),
+#endif
 	.msmsdcc_fmin	= 144000,
 	.msmsdcc_fmid	= 24576000,
 	.msmsdcc_fmax	= 49152000,
@@ -6919,7 +6904,7 @@ static int __init pmem_sf_size_setup(char *p)
 }
 early_param("pmem_sf_size", pmem_sf_size_setup);
 
-static unsigned fb_size;
+static unsigned fb_size = MSM_FB_SIZE;
 static int __init fb_size_setup(char *p)
 {
 	fb_size = memparse(p, NULL);
@@ -7000,17 +6985,10 @@ static void __init reserve_pmem_memory(void)
 #endif
 }
 
-static void __init reserve_mdp_memory(void)
-{
-	mdp_pdata.ov0_wb_size = MSM_FB_OVERLAY0_WRITEBACK_SIZE;
-	msm7x30_reserve_table[mdp_pdata.mem_hid].size += mdp_pdata.ov0_wb_size;
-}
-
 static void __init msm7x30_calculate_reserve_sizes(void)
 {
 	size_pmem_devices();
 	reserve_pmem_memory();
-	reserve_mdp_memory();
 }
 
 static int msm7x30_paddr_to_memtype(unsigned int paddr)

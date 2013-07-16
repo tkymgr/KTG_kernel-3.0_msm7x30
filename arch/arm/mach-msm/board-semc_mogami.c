@@ -37,6 +37,8 @@
 #include <linux/i2c/sii9024.h>
 #endif /* CONFIG_FB_MSM_HDMI_SII9024A_PANEL */
 #include <linux/dma-mapping.h>
+#include <linux/i2c/bq27520_battery.h>
+#include <linux/battery_chargalg.h>
 #ifdef CONFIG_CHARGER_BQ24185
 #include <linux/i2c/bq24185_charger.h>
 #endif
@@ -113,7 +115,6 @@
 #include <linux/leds-as3676.h>
 #include "board-semc_mogami-leds.h"
 #include "board-semc_mogami-touch.h"
-#include <linux/i2c/bq27520_battery_semc.h>
 #ifdef CONFIG_INPUT_BMA150
 #include <linux/bma150.h>
 #endif
@@ -155,7 +156,6 @@
 #ifdef CONFIG_SEMC_MOGAMI_FELICA_SUPPORT
 #include <mach/semc_mogami_felica.h>
 #endif
-#include <linux/battery_chargalg.h>
 
 #define BQ24185_GPIO_IRQ		(31)
 #define CYPRESS_TOUCH_GPIO_RESET	(40)
@@ -1295,36 +1295,6 @@ static struct msm_gpio timpani_reset_gpio_cfg[] = {
 { GPIO_CFG(TIMPANI_RESET_GPIO, 0, GPIO_CFG_OUTPUT,
 	GPIO_CFG_NO_PULL, GPIO_CFG_2MA), "timpani_reset"} };
 
-static u8 read_bahama_ver(void)
-{
-	int rc;
-	struct marimba config = { .mod_id = SLAVE_ID_BAHAMA };
-	u8 bahama_version;
-
-	rc = marimba_read_bit_mask(&config, 0x00,  &bahama_version, 1, 0x1F);
-	if (rc < 0) {
-		printk(KERN_ERR
-			 "%s: version read failed: %d\n",
-			__func__, rc);
-			return rc;
-	} else {
-		printk(KERN_INFO
-		"%s: version read got: 0x%x\n",
-		__func__, bahama_version);
-	}
-
-	switch (bahama_version) {
-	case 0x08: /* varient of bahama v1 */
-	case 0x10:
-	case 0x00:
-		return VER_1_0;
-	case 0x09: /* variant of bahama v2 */
-		return VER_2_0;
-	default:
-		return VER_UNSUPPORTED;
-	}
-}
-
 static int config_timpani_reset(void)
 {
 	int rc;
@@ -1397,72 +1367,6 @@ static void msm_timpani_shutdown_power(void)
 
 	msm_gpios_free(timpani_reset_gpio_cfg,
 				   ARRAY_SIZE(timpani_reset_gpio_cfg));
-};
-
-static unsigned int msm_bahama_core_config(int type)
-{
-	int rc = 0;
-
-	if (type == BAHAMA_ID) {
-
-		int i;
-		struct marimba config = { .mod_id = SLAVE_ID_BAHAMA };
-
-		const struct bahama_config_register v20_init[] = {
-			/* reg, value, mask */
-			{ 0xF4, 0x84, 0xFF }, /* AREG */
-			{ 0xF0, 0x04, 0xFF } /* DREG */
-		};
-
-		if (read_bahama_ver() == VER_2_0) {
-			for (i = 0; i < ARRAY_SIZE(v20_init); i++) {
-				u8 value = v20_init[i].value;
-				rc = marimba_write_bit_mask(&config,
-					v20_init[i].reg,
-					&value,
-					sizeof(v20_init[i].value),
-					v20_init[i].mask);
-				if (rc < 0) {
-					printk(KERN_ERR
-						"%s: reg %d write failed: %d\n",
-						__func__, v20_init[i].reg, rc);
-					return rc;
-				}
-				printk(KERN_INFO "%s: reg 0x%02x value 0x%02x"
-					" mask 0x%02x\n",
-					__func__, v20_init[i].reg,
-					v20_init[i].value, v20_init[i].mask);
-			}
-		}
-	}
-	printk(KERN_INFO "core type: %d\n", type);
-
-	return rc;
-}
-
-static unsigned int msm_bahama_setup_power(void)
-{
-	int rc = regulator_enable(vreg_bahama);
-
-	if (rc)
-		pr_err("%s: regulator_enable failed (%d)\n", __func__, rc);
-
-	return rc;
-};
-
-static unsigned int msm_bahama_shutdown_power(int value)
-{
-	int rc = 0;
-
-	if (value != BAHAMA_ID) {
-		rc = regulator_disable(vreg_bahama);
-
-		if (rc)
-			pr_err("%s: regulator_disable failed (%d)\n",
-					__func__, rc);
-	}
-
-	return rc;
 };
 
 static struct msm_gpio marimba_svlte_config_clock[] = {
@@ -1751,14 +1655,9 @@ static struct marimba_platform_data marimba_pdata = {
 	.slave_id[MARIMBA_SLAVE_ID_FM]       = MARIMBA_SLAVE_ID_FM_ADDR,
 	.slave_id[MARIMBA_SLAVE_ID_CDC]	     = MARIMBA_SLAVE_ID_CDC_ADDR,
 	.slave_id[MARIMBA_SLAVE_ID_QMEMBIST] = MARIMBA_SLAVE_ID_QMEMBIST_ADDR,
-	.slave_id[SLAVE_ID_BAHAMA_FM]        = BAHAMA_SLAVE_ID_FM_ADDR,
-	.slave_id[SLAVE_ID_BAHAMA_QMEMBIST]  = BAHAMA_SLAVE_ID_QMEMBIST_ADDR,
 	.marimba_setup = msm_marimba_setup_power,
 	.marimba_shutdown = msm_marimba_shutdown_power,
-	.bahama_setup = msm_bahama_setup_power,
-	.bahama_shutdown = msm_bahama_shutdown_power,
 	.marimba_gpio_config = msm_marimba_gpio_config_svlte,
-	.bahama_core_config = msm_bahama_core_config,
 	.codec = &mariba_codec_pdata,
 	.tsadc_ssbi_adap = MARIMBA_SSBI_ADAP,
 };
@@ -2951,7 +2850,21 @@ static struct platform_device bdata_driver = {
 	},
 };
 
-/* Driver(s) to be notified upon change in fuelgauge data */
+static int bq27520_gpio_configure(int enable)
+{
+	int rc = 0;
+
+	if (!!enable) {
+		rc = gpio_request(GPIO_BQ27520_SOC_INT, "bq27520");
+		if (rc)
+			pr_err("%s: gpio_requeset failed, "
+					"rc=%d\n", __func__, rc);
+	} else {
+		gpio_free(GPIO_BQ27520_SOC_INT);
+	}
+	return rc;
+}
+
 static char *bq27520_supplied_to[] = {
 	BATTERY_CHARGALG_NAME,
 };
@@ -2969,18 +2882,19 @@ struct bq27520_platform_data bq27520_platform_data = {
 	.num_supplicants = ARRAY_SIZE(bq27520_supplied_to),
 	.lipo_bat_max_volt = LIPO_BAT_MAX_VOLTAGE,
 	.lipo_bat_min_volt = LIPO_BAT_MIN_VOLTAGE,
-#ifdef CONFIG_BATTERY_BQ27520
 	.battery_dev_name = SEMC_BDATA_NAME,
-#endif
+	.gpio_configure = bq27520_gpio_configure,
 	.polling_lower_capacity = FULLY_CHARGED_AND_RECHARGE_CAP,
 	.polling_upper_capacity = 100,
 	.udatap = bq27520_block_table,
 #ifdef CONFIG_BATTERY_CHARGALG
 	.disable_algorithm = battery_chargalg_disable,
 #endif
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	.get_ac_online_status = semc_charger_get_ac_online_status,
+#endif
 };
 
-/* Driver(s) to be notified upon change in charging */
 static char *bq24185_supplied_to[] = {
 	BATTERY_CHARGALG_NAME,
 	SEMC_BDATA_NAME,
@@ -3018,14 +2932,6 @@ struct bq24185_platform_data bq24185_platform_data = {
 	.vindpm_non_compliant = VINDPM_4390MV,
 };
 
-static struct battery_regulation_vs_temperature id_bat_reg = {
-	/* Cold, Normal, Warm, Overheat */
-	{5, 45,		55,	127},	/* temp */
-	{0, 4200,	4000,	0},	/* volt */
-	{0, USHRT_MAX,	400,	0},	/* curr */
-};
-
-/* Driver(s) to be notified upon change in algorithm */
 static char *battery_chargalg_supplied_to[] = {
 	SEMC_BDATA_NAME,
 };
@@ -3034,13 +2940,11 @@ static struct battery_chargalg_platform_data battery_chargalg_platform_data = {
 	.name = BATTERY_CHARGALG_NAME,
 	.supplied_to = battery_chargalg_supplied_to,
 	.num_supplicants = ARRAY_SIZE(battery_chargalg_supplied_to),
-	.id_bat_reg = &id_bat_reg,
 	.ext_eoc_recharge_enable = 1,
 	.temp_hysteresis_design = 3,
 	.ddata = &device_data,
 	.batt_volt_psy_name = BQ27520_NAME,
 	.batt_curr_psy_name = BQ27520_NAME,
-
 #ifdef CONFIG_CHARGER_BQ24185
 	.turn_on_charger = bq24185_turn_on_charger,
 	.turn_off_charger = bq24185_turn_off_charger,
@@ -3049,9 +2953,9 @@ static struct battery_chargalg_platform_data battery_chargalg_platform_data = {
 	.set_input_current_limit = bq24185_set_input_current_limit,
 	.set_charging_status = bq24185_set_ext_charging_status,
 	.get_supply_current_limit = NULL,
-//	.get_restrict_ctl = NULL,
-//	.get_restricted_setting = NULL,
-//	.setup_exchanged_power_supply = NULL,
+	.get_restrict_ctl = NULL,
+	.get_restricted_setting = NULL,
+	.setup_exchanged_power_supply = NULL,
 	.charge_set_current_1 = 350,
 	.charge_set_current_2 = 550,
 	.charge_set_current_3 = 750,
@@ -3096,7 +3000,6 @@ static struct platform_device battery_chargalg_platform_device = {
 	},
 };
 
-#if defined(CONFIG_LM3560) || defined(CONFIG_LM3561)
 int lm356x_request_gpio_pins(void)
 {
 	int result;
@@ -3119,9 +3022,7 @@ int lm356x_release_gpio_pins(void)
 
 	return 0;
 }
-#endif
 
-#ifdef CONFIG_LM3560
 static struct lm356x_platform_data lm3560_platform_data = {
 	.hw_enable              = lm356x_request_gpio_pins,
 	.hw_disable             = lm356x_release_gpio_pins,
@@ -3138,29 +3039,6 @@ static struct lm356x_platform_data lm3560_platform_data = {
 	.tx2_polarity		= LM356X_TX2_POLARITY_HIGH,
 	.hw_torch_mode		= LM356X_HW_TORCH_MODE_DISABLE,
 };
-#endif
-#ifdef CONFIG_LM3561
-static struct lm356x_platform_data lm3561_platform_data = {
-	.hw_enable              = lm356x_request_gpio_pins,
-	.hw_disable             = lm356x_release_gpio_pins,
-	.led_nums		= 1,
-	.strobe_trigger		= LM356X_STROBE_TRIGGER_EDGE,
-	.privacy_terminate	= LM356X_PRIVACY_MODE_TURN_BACK,
-	.privacy_led_nums	= 0,
-	.privacy_blink_period	= 0, /* No bliking */
-	.current_limit		= 1000, /* uA
-				   selectable value are 1500mA or 1000mA.
-				   if set other value,
-				   it assume current limit is 1000mA.
-				*/
-	.flash_sync		= LM356X_SYNC_OFF,
-	.strobe_polarity	= LM356X_STROBE_POLARITY_HIGH,
-	.ledintc_pin_setting	= LM356X_LEDINTC_NTC_THERMISTOR_INPUT,
-	.tx1_polarity		= LM356X_TX1_POLARITY_HIGH,
-	.tx2_polarity		= LM356X_TX2_POLARITY_HIGH,
-	.hw_torch_mode		= LM356X_HW_TORCH_MODE_DISABLE,
-};
-#endif
 
 #ifdef CONFIG_INPUT_BMA150
 static int bma150_gpio_setup(struct device *dev)
@@ -3316,10 +3194,8 @@ static struct i2c_board_info msm_i2c_board_info[] = {
 		.platform_data = &as3676_platform_data,
 	},
 	{
-		I2C_BOARD_INFO(BQ27520_NAME, 0xAA >> 1),
-		.irq = MSM_GPIO_TO_INT(GPIO_BQ27520_SOC_INT),
-		.platform_data = &bq27520_platform_data,
-		.type = BQ27520_NAME,
+		I2C_BOARD_INFO("lm3560", 0xA6 >> 1),
+		.platform_data = &lm3560_platform_data,
 	},
 #ifdef CONFIG_CHARGER_BQ24185
 	{
@@ -3337,14 +3213,12 @@ static struct i2c_board_info msm_i2c_board_info[] = {
 		.type = BQ24160_NAME,
 	},
 #endif
-#ifdef CONFIG_INPUT_BMA150
-	{ /* TODO: Remove? Added due to wrong bus connection on Anzu SP1. */
-		I2C_BOARD_INFO("bma150", 0x70 >> 1),
-		.irq = MSM_GPIO_TO_INT(BMA150_GPIO),
-		.platform_data = &bma150_platform_data,
-		.type = "bma150"
+	{
+		I2C_BOARD_INFO(BQ27520_NAME, 0xAA >> 1),
+		.irq = MSM_GPIO_TO_INT(GPIO_BQ27520_SOC_INT),
+		.platform_data = &bq27520_platform_data,
+		.type = BQ27520_NAME,
 	},
-#endif
 #ifdef CONFIG_INPUT_BMA150_NG
 	{
 		I2C_BOARD_INFO("bma150", 0x70 >> 1),
@@ -3384,18 +3258,6 @@ static struct i2c_board_info msm_i2c_board_info[] = {
 		.irq = MSM_GPIO_TO_INT(AKM8975_GPIO),
 		.platform_data = &akm8975_platform_data,
 	},
-#ifdef CONFIG_LM3560
-	{
-		I2C_BOARD_INFO("lm3560", 0xA6 >> 1),
-		.platform_data = &lm3560_platform_data,
-	},
-#endif
-#ifdef CONFIG_LM3561
-	{
-		I2C_BOARD_INFO("lm3561", 0xA6 >> 1),
-		.platform_data = &lm3561_platform_data,
-	},
-#endif
 };
 
 static struct i2c_board_info mogami_qup_i2c_devices[] __initdata = {
@@ -4848,7 +4710,6 @@ static void __init msm7x30_init(void)
 	msm_device_i2c_2_init();
 	qup_device_i2c_init();
 	msm7x30_init_marimba();
-
 #ifdef CONFIG_MSM7KV2_AUDIO
 	snddev_poweramp_gpio_init();
 	snddev_hsed_voltage_init();
@@ -4969,17 +4830,10 @@ static void __init reserve_pmem_memory(void)
 #endif
 }
 
-static void __init reserve_mdp_memory(void)
-{
-	mdp_pdata.ov0_wb_size = MSM_FB_OVERLAY0_WRITEBACK_SIZE;
-	msm7x30_reserve_table[mdp_pdata.mem_hid].size += mdp_pdata.ov0_wb_size;
-}
-
 static void __init msm7x30_calculate_reserve_sizes(void)
 {
 	size_pmem_devices();
 	reserve_pmem_memory();
-	reserve_mdp_memory();
 }
 
 static int msm7x30_paddr_to_memtype(unsigned int paddr)
@@ -5014,18 +4868,6 @@ static void __init msm7x30_allocate_memory_regions(void)
 	msm_fb_resources[0].end = msm_fb_resources[0].start + size - 1;
 	pr_info("allocating %lu bytes at %p (%lx physical) for fb\n",
 		size, addr, __pa(addr));
-
-#ifdef CONFIG_ANDROID_RAM_CONSOLE
-	/* RAM Console can't use alloc_bootmem(), since that zeroes the
-	 * region */
-	size = MSM_RAM_CONSOLE_SIZE;
-	ram_console_resources[0].start = msm_fb_resources[0].end+1;
-	ram_console_resources[0].end = ram_console_resources[0].start + size - 1;
-	pr_info("allocating %lu bytes at (%lx physical) for ram console\n",
-		size, (unsigned long)ram_console_resources[0].start);
-	/* We still have to reserve it, though */
-	reserve_bootmem(ram_console_resources[0].start,size,0);
-#endif
 }
 
 static void __init msm7x30_map_io(void)

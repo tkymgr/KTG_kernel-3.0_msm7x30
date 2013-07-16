@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -129,16 +129,10 @@ void vcd_ddl_callback(u32 event, u32 status, void *payload,
 		{
 			transc = (struct vcd_transc *)client_data;
 
-			if (!transc || !transc->in_use || !transc->cctxt) {
+			if (!transc || !transc->in_use
+				|| !transc->cctxt) {
 				VCD_MSG_ERROR("Invalid clientdata "
-					"received from DDL, transc = 0x%x\n",
-					(u32)transc);
-				if (transc) {
-					VCD_MSG_ERROR("transc->in_use = %u, "
-						"transc->cctxt = 0x%x\n",
-						transc->in_use,
-						(u32)transc->cctxt);
-				}
+							  "received from DDL ");
 			} else {
 				cctxt = transc->cctxt;
 
@@ -219,7 +213,6 @@ u32 vcd_init_device_context(struct vcd_drv_ctxt *drv_ctxt,
 						   VCD_DEVICE_STATE_INITING,
 						   ev_code);
 	}
-	dev_ctxt->turbo_mode_set = 0;
 
 	return rc;
 }
@@ -961,9 +954,6 @@ static void vcd_dev_cb_in_initing
 	u32 rc = VCD_S_SUCCESS;
 	u32 client_inited = false;
 	u32 fail_all_open = false;
-	struct ddl_context *ddl_context;
-
-	ddl_context = ddl_get_context();
 
 	VCD_MSG_LOW("vcd_dev_cb_in_initing:");
 
@@ -1037,8 +1027,6 @@ static void vcd_dev_cb_in_initing
 
 			tmp_client = client;
 			client = client->next;
-			if (tmp_client == dev_ctxt->cctxt_list_head)
-				fail_all_open = true;
 
 			vcd_destroy_client_context(tmp_client);
 		}
@@ -1047,10 +1035,6 @@ static void vcd_dev_cb_in_initing
 	if (!client_inited || fail_all_open) {
 		VCD_MSG_ERROR("All client open requests failed");
 
-		DDL_IDLE(ddl_context);
-
-		vcd_handle_device_init_failed(drv_ctxt,
-			DEVICE_STATE_EVENT_NUMBER(close));
 		dev_ctxt->pending_cmd = VCD_CMD_DEVICE_TERM;
 	} else {
 		if (vcd_power_event(dev_ctxt, NULL,
